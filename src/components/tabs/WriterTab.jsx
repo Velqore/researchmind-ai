@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../../AppContext';
+import { PRICE_LABEL } from '../../config';
 
 const TOOLS = [
   {
@@ -17,6 +18,14 @@ const TOOLS = [
     desc: 'Rewrite passages in your own voice while keeping the meaning.',
     placeholder: 'Paste text to paraphrase…',
     cta: 'Paraphrase text',
+  },
+  {
+    id: 'polish',
+    icon: '🧹',
+    name: 'Grammar Polish',
+    desc: 'Fix grammar and sharpen clarity without changing your voice.',
+    placeholder: 'Paste text to polish…',
+    cta: 'Polish text',
   },
 ];
 
@@ -82,7 +91,7 @@ export default function WriterTab() {
               feature.
             </p>
             <button onClick={openUpgrade} className="btn-primary mt-3">
-              ⚡ Unlock for $1.50/month
+              ⚡ Unlock for {PRICE_LABEL}
             </button>
           </div>
         )}

@@ -16,6 +16,12 @@ const PRO_TOOLS = [
   { icon: '🎥', name: 'YouTube lectures', desc: 'Summarize any lecture video' },
   { icon: '💬', name: 'Chat with PDF', desc: 'Ask questions to any paper' },
   { icon: '📰', name: 'Daily digest', desc: 'Google Scholar updates on your topic' },
+  { icon: '🃏', name: 'Flashcards', desc: 'Auto-generate study cards from papers' },
+  { icon: '🕸️', name: 'Mind maps', desc: 'Visualize a topic or paper as a map' },
+  { icon: '📝', name: 'Lit review draft', desc: 'First-draft literature reviews' },
+  { icon: '🔗', name: 'Related papers', desc: 'Discover connected research' },
+  { icon: '📋', name: 'Extract tables', desc: 'Pull tables & figures from PDFs' },
+  { icon: '🌐', name: 'Translate', desc: 'Read papers in 50+ languages' },
 ];
 
 export default function ResearchTab() {
@@ -110,7 +116,7 @@ export default function ResearchTab() {
         </div>
 
         {!isPro && explainLeft === 0 ? (
-          <LimitBanner message="You've used all your free term explanations today. Unlock unlimited access for just $1.50/month 🚀" />
+          <LimitBanner message="You've used all your free term explanations today. Unlock unlimited access for just $1.40 for 6 months 🚀" />
         ) : (
           <>
             <div className="flex gap-2">
@@ -171,7 +177,7 @@ export default function ResearchTab() {
         </div>
 
         {!isPro && citeLeft === 0 ? (
-          <LimitBanner message="You've used all your free citations today. Unlock unlimited access for just $1.50/month 🚀" />
+          <LimitBanner message="You've used all your free citations today. Unlock unlimited access for just $1.40 for 6 months 🚀" />
         ) : (
           <>
             <div className="mb-2.5 flex gap-1.5" role="radiogroup" aria-label="Citation style">

@@ -65,7 +65,7 @@ export default function LibraryTab() {
         </div>
 
         {limitHit ? (
-          <LimitBanner message="You've saved all your free highlights today. Unlock unlimited access for just $1.50/month 🚀" />
+          <LimitBanner message="You've saved all your free highlights today. Unlock unlimited access for just $1.40 for 6 months 🚀" />
         ) : (
           <>
             <button onClick={saveSelection} disabled={saving} className="btn-primary">

@@ -19,11 +19,11 @@ Subscription & license system. AI endpoints (`/summarize`, `/explain`, `/cite`, 
 
 ### 2. PayPal
 1. In [developer.paypal.com](https://developer.paypal.com) create an app → copy **Client ID** and **Secret** (start in Sandbox).
-2. Create a **product** and a **subscription plan**: $1.50/month (PayPal dashboard → Pay & Get Paid → Subscriptions, or via API).
+2. Create a **product** and a **subscription plan**: **$1.40 every 6 months** (PayPal dashboard → Pay & Get Paid → Subscriptions, or via API; billing cycle = 6 months).
 3. Paste the plan id into the extension's `src/config.js` → `PAYPAL_PLAN_ID`.
 4. Add a **webhook** pointing to `https://YOUR-DEPLOYMENT.vercel.app/generate-key` subscribed to:
-   - `BILLING.SUBSCRIPTION.ACTIVATED` (issues the key)
-   - `PAYMENT.SALE.COMPLETED` (monthly renewal → +30 days)
+   - `BILLING.SUBSCRIPTION.ACTIVATED` (issues the key, valid 180 days)
+   - `PAYMENT.SALE.COMPLETED` (renewal → +180 days)
    - `PAYMENT.SALE.REFUNDED`, `PAYMENT.SALE.REVERSED` (deactivates the key)
 5. Copy the **Webhook ID**.
 

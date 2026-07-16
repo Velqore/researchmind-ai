@@ -1,9 +1,17 @@
 import React from 'react';
 import { useApp } from '../AppContext';
+import { isExtension } from '../lib/storage';
 import Logo from './Logo';
+
+const isFullPage =
+  typeof document !== 'undefined' && document.documentElement.classList.contains('full-page');
 
 export default function Header({ onOpenSettings }) {
   const { isPro, openUpgrade } = useApp();
+
+  const openFullView = () => {
+    chrome.tabs.create({ url: chrome.runtime.getURL('popup.html?full=1') });
+  };
 
   return (
     <header className="flex items-center justify-between px-4 pb-2 pt-3.5">
@@ -16,6 +24,18 @@ export default function Header({ onOpenSettings }) {
           <p className="text-[10.5px] font-medium text-slate-400">Your AI research copilot</p>
         </div>
       </div>
+
+      <div className="flex items-center gap-1.5">
+      {isExtension && !isFullPage && (
+        <button
+          onClick={openFullView}
+          title="Open in full page"
+          aria-label="Open in full page"
+          className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-[13px] text-slate-400 transition-all duration-150 hover:border-white/20 hover:text-white"
+        >
+          ⤢
+        </button>
+      )}
 
       {isPro ? (
         <button
@@ -36,6 +56,7 @@ export default function Header({ onOpenSettings }) {
           ⚡ Upgrade
         </button>
       )}
+      </div>
     </header>
   );
 }

@@ -48,7 +48,7 @@ PAYPAL_CLIENT_SECRET = os.environ.get("PAYPAL_CLIENT_SECRET", "")
 PAYPAL_WEBHOOK_ID = os.environ.get("PAYPAL_WEBHOOK_ID", "")
 
 KEY_ALPHABET = "ABCDEFGHJKMNPQRSTVWXYZ23456789"  # no 0/O/1/I lookalikes
-LICENSE_DAYS = 30
+LICENSE_DAYS = 180  # $1.40 per 6-month subscription cycle
 
 
 def require_env(*pairs: tuple[str, str]) -> None:
@@ -312,7 +312,7 @@ async def generate_key(request: Request):
             return {"status": "key_issued"}
 
         if event_type == "PAYMENT.SALE.COMPLETED":
-            # Monthly renewal — extend the existing key by 30 days.
+            # Subscription renewal — extend the existing key by another cycle.
             subscription_id = resource.get("billing_agreement_id")
             if subscription_id:
                 rows = await sb_select(

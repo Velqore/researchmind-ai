@@ -10,15 +10,17 @@ export const API_BASE = 'https://researchmind-api.vercel.app';
 export const DEMO_MODE = true;
 
 // Real PayPal subscription checkout.
-// Create the $1.50/month plan in the PayPal dashboard (see backend/README.md)
+// Create the $1.40 / 6-month plan in the PayPal dashboard (see backend/README.md)
 // and paste its plan id here.
 export const PAYPAL_PLAN_ID = 'YOUR_PAYPAL_PLAN_ID';
 export const UPGRADE_URL = `https://www.paypal.com/webapps/billing/subscriptions?plan_id=${PAYPAL_PLAN_ID}`;
 
-export const PRICE_LABEL = '$1.50/month';
+export const PRICE_LABEL = '$1.40 / 6 months';
+export const PRICE_SUBTEXT = 'One payment · ~23¢ a month';
+export const PLAN_DAYS = 180;
 
 export const LIMIT_HIT_MESSAGE =
-  "You've used all your free summaries today. Unlock unlimited access for just $1.50/month 🚀";
+  "You've used all your free summaries today. Unlock unlimited access for just $1.40 for 6 months 🚀";
 
 // Free tier daily limits — reset at LOCAL midnight.
 export const DAILY_LIMITS = {
@@ -47,4 +49,12 @@ export const PRO_FEATURES = [
   { icon: '🕐', label: 'Research timeline builder' },
   { icon: '✨', label: 'AI text humanizer' },
   { icon: '🔄', label: 'Plagiarism remover & paraphraser' },
+  { icon: '🃏', label: 'Flashcard generator from any paper' },
+  { icon: '🕸️', label: 'Mind-map builder for topics & papers' },
+  { icon: '📝', label: 'Literature review draft writer' },
+  { icon: '🔗', label: 'Related-papers finder' },
+  { icon: '📋', label: 'Table & figure extraction from PDFs' },
+  { icon: '🌐', label: 'Translate papers (50+ languages)' },
+  { icon: '🧹', label: 'Grammar & clarity polish' },
+  { icon: '⚡', label: 'Priority support & early access to new tools' },
 ];

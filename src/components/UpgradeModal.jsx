@@ -1,5 +1,5 @@
 import React from 'react';
-import { LIMIT_HIT_MESSAGE, PRICE_LABEL, PRO_FEATURES } from '../config';
+import { LIMIT_HIT_MESSAGE, PRICE_LABEL, PRICE_SUBTEXT, PRO_FEATURES } from '../config';
 import { openCheckout } from '../lib/checkout';
 import Countdown from './Countdown';
 
@@ -53,7 +53,10 @@ export default function UpgradeModal({ onClose }) {
           <button onClick={openCheckout} className="btn-primary text-[14px]">
             Upgrade to Pro — {PRICE_LABEL}
           </button>
-          <p className="mt-2.5 text-center text-[11px] text-slate-500">
+          <p className="mt-1.5 text-center text-[11px] font-semibold text-brand-cyan">
+            {PRICE_SUBTEXT}
+          </p>
+          <p className="mt-1.5 text-center text-[11px] text-slate-500">
             Secure payment via PayPal · Cancel anytime · License key sent by email
           </p>
           <p className="mt-1.5 flex items-center justify-center gap-1.5 text-center text-[11px] text-slate-400">

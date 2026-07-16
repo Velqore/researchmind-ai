@@ -1,6 +1,6 @@
 import React from 'react';
 import { useApp } from '../AppContext';
-import { LIMIT_HIT_MESSAGE } from '../config';
+import { LIMIT_HIT_MESSAGE, PRICE_LABEL } from '../config';
 import Countdown from './Countdown';
 
 /** Inline banner shown in place of a feature when its daily limit is exhausted. */
@@ -15,7 +15,7 @@ export default function LimitBanner({ message = LIMIT_HIT_MESSAGE }) {
         <Countdown className="rounded-md bg-white/[0.07] px-2 py-0.5 text-[12px] font-bold text-brand-cyan" />
       </div>
       <button onClick={openUpgrade} className="btn-primary mt-3.5">
-        ⚡ Upgrade to Pro — $1.50/month
+        ⚡ Upgrade to Pro — {PRICE_LABEL}
       </button>
     </div>
   );

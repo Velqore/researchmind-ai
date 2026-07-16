@@ -28,10 +28,50 @@ body {
 /* Ambient gradient glow behind everything */
 .app-bg {
   background:
-    radial-gradient(60% 45% at 15% -10%, rgba(139, 92, 246, 0.28), transparent 60%),
-    radial-gradient(55% 40% at 95% 0%, rgba(59, 130, 246, 0.22), transparent 60%),
-    radial-gradient(70% 55% at 50% 115%, rgba(168, 85, 247, 0.14), transparent 65%),
+    radial-gradient(60% 45% at 15% -10%, rgba(139, 92, 246, 0.3), transparent 60%),
+    radial-gradient(55% 40% at 95% 0%, rgba(59, 130, 246, 0.24), transparent 60%),
+    radial-gradient(40% 30% at 80% 55%, rgba(34, 211, 238, 0.06), transparent 70%),
+    radial-gradient(70% 55% at 50% 115%, rgba(168, 85, 247, 0.16), transparent 65%),
     #0a0714;
+}
+
+/* ---- Layout modes ------------------------------------------------------- */
+/* Full-page mode: opened as a tab (⤢ button, mobile browsers that render
+   popups full-screen, or the dev preview). Fluid, centered, full height. */
+html.full-page,
+html.full-page body {
+  width: 100%;
+}
+html.full-page body {
+  height: 100vh;
+  display: flex;
+  justify-content: center;
+  background:
+    radial-gradient(50% 40% at 50% -10%, rgba(139, 92, 246, 0.12), transparent 60%),
+    #06040d;
+}
+html.full-page #root {
+  width: 100%;
+  max-width: 520px;
+  height: 100vh;
+  border-inline: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 0 90px rgba(139, 92, 246, 0.14);
+}
+@media (min-width: 1280px) {
+  html.full-page #root {
+    max-width: 560px;
+  }
+}
+
+/* Narrow phones (Kiwi / Edge Android render the popup at device width) */
+@media (max-width: 399px) {
+  html,
+  body {
+    width: 100%;
+  }
+  body {
+    height: 100vh;
+  }
 }
 
 /* ---- Reusable visual primitives ---------------------------------------- */
@@ -41,7 +81,7 @@ body {
     @apply rounded-2xl border border-white/[0.08] bg-white/[0.04] shadow-card backdrop-blur-xl;
   }
   .glass-hover {
-    @apply transition-all duration-200 hover:border-white/[0.16] hover:bg-white/[0.07];
+    @apply transition-all duration-200 hover:-translate-y-0.5 hover:border-white/[0.16] hover:bg-white/[0.07];
   }
 
   /* Signature gradient */
@@ -82,6 +122,45 @@ body {
     );
     background-size: 200% 100%;
     animation: shimmer 1.6s linear infinite;
+  }
+}
+
+/* ---- Polish: card depth & button shine ---------------------------------- */
+/* Top inner highlight gives glass cards a lit edge */
+.glass {
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+/* Light sweep across primary buttons on hover */
+.btn-primary {
+  overflow: hidden;
+}
+.btn-primary::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 40%,
+    rgba(255, 255, 255, 0.28) 50%,
+    transparent 60%
+  );
+  transform: translateX(-130%);
+  transition: transform 0.55s ease;
+  pointer-events: none;
+}
+.btn-primary:hover::after {
+  transform: translateX(130%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn-primary::after {
+    display: none;
+  }
+  .glass-hover:hover {
+    transform: none;
   }
 }
 
