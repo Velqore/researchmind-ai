@@ -16,11 +16,14 @@ import '@fontsource/inter/800.css';
 //    e.g. the dev preview): fluid, centered column, full height
 //  - narrow phones (Kiwi/Edge on Android render the popup at device width):
 //    handled by a max-width media query in index.css
-// NOTE: never sniff window.innerWidth here — Chrome popups report a bogus
-// default viewport while opening, which would collapse the popup layout.
+// NOTE: never sniff window.innerWidth here — Chrome popups size themselves
+// from their content, so any viewport-derived rule collapses the popup.
+// screen.width is the device's physical screen and is always stable.
 const isExtension = typeof chrome !== 'undefined' && !!chrome.storage?.local;
 if (new URLSearchParams(location.search).has('full') || !isExtension) {
   document.documentElement.classList.add('full-page');
+} else if (window.screen && window.screen.width < 500) {
+  document.documentElement.classList.add('narrow'); // phone browsers (Kiwi/Edge)
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(

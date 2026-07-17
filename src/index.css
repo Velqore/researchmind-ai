@@ -63,15 +63,17 @@ html.full-page #root {
   }
 }
 
-/* Narrow phones (Kiwi / Edge Android render the popup at device width) */
-@media (max-width: 399px) {
-  html,
-  body {
-    width: 100%;
-  }
-  body {
-    height: 100vh;
-  }
+/* Narrow phones (Kiwi / Edge Android render the popup at device width).
+   The .narrow class is set from JS using screen.width — NEVER via a viewport
+   media query: Chrome popups size themselves from their content, so a
+   width:100% rule at small viewports creates a feedback loop that collapses
+   the popup into a sliver. */
+html.narrow,
+html.narrow body {
+  width: 100vw;
+}
+html.narrow body {
+  height: 100vh;
 }
 
 /* ---- Reusable visual primitives ---------------------------------------- */

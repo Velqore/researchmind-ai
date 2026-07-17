@@ -3,6 +3,9 @@ import { useApp } from '../../AppContext';
 import { PRICE_LABEL } from '../../config';
 import { openCheckout } from '../../lib/checkout';
 import { activateKey, deactivate, normalizeKey } from '../../lib/license';
+import { isExtension } from '../../lib/storage';
+
+const VERSION = isExtension ? chrome.runtime.getManifest().version : 'dev';
 
 export default function SettingsTab() {
   const { isPro, license, refresh, openUpgrade } = useApp();
@@ -148,7 +151,7 @@ export default function SettingsTab() {
         <div className="space-y-2 text-[12px]">
           <div className="flex items-center justify-between">
             <span className="text-slate-400">Version</span>
-            <span className="font-medium text-slate-200">1.0.0</span>
+            <span className="font-medium text-slate-200">{VERSION}</span>
           </div>
           <div className="flex items-center justify-between">
             <span className="text-slate-400">Plan</span>
