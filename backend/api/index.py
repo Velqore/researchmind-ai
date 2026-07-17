@@ -385,6 +385,15 @@ async def verify_paypal_webhook(client: httpx.AsyncClient, request: Request, eve
 # ------------------------------------------------------------------ endpoints
 
 
+@app.get("/")
+async def root():
+    return {
+        "service": "ResearchMind AI API",
+        "status": "ok",
+        "docs": "https://github.com/Velqore/researchmind-ai#readme",
+    }
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "researchmind-api"}
