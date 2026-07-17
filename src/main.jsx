@@ -11,12 +11,15 @@ import '@fontsource/inter/700.css';
 import '@fontsource/inter/800.css';
 
 // Layout modes:
-//  - popup (desktop Chrome toolbar): fixed 400×600
-//  - full-page (?full=1 via the ⤢ button, or any wide viewport such as a
-//    normal tab / dev preview): fluid, centered column, full height
+//  - popup (Chrome toolbar): fixed 400×600
+//  - full-page (?full=1 via the ⤢ button, or running outside the extension,
+//    e.g. the dev preview): fluid, centered column, full height
 //  - narrow phones (Kiwi/Edge on Android render the popup at device width):
 //    handled by a max-width media query in index.css
-if (new URLSearchParams(location.search).has('full') || window.innerWidth >= 500) {
+// NOTE: never sniff window.innerWidth here — Chrome popups report a bogus
+// default viewport while opening, which would collapse the popup layout.
+const isExtension = typeof chrome !== 'undefined' && !!chrome.storage?.local;
+if (new URLSearchParams(location.search).has('full') || !isExtension) {
   document.documentElement.classList.add('full-page');
 }
 
