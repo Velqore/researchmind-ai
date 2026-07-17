@@ -1,14 +1,33 @@
 # ResearchMind AI — Backend (FastAPI on Vercel)
 
-Subscription & license system. AI endpoints (`/summarize`, `/explain`, `/cite`, …) ship in the next build step.
+AI endpoints (Hugging Face Inference Providers, model: `Qwen/Qwen2.5-72B-Instruct` by default) + subscription & license system.
 
 ## Endpoints
 
 | Endpoint | Method | Purpose |
 |---|---|---|
 | `/health` | GET | Liveness probe |
+| `/summarize` | POST | Summarize page/document text — cached 24h in Supabase, free-tier limited |
+| `/explain` | POST | Explain an academic term (free-tier limited) |
+| `/cite` | POST | APA/MLA/Chicago citation (free-tier limited) |
+| `/humanize` `/paraphrase` `/polish` | POST | **Pro** writer tools (valid license key required) |
+| `/compare` `/research-gap` | POST | **Pro** multi-paper analysis |
 | `/validate-key` | POST | Validates a license key (SHA-256 lookup in Supabase, expiry check) |
 | `/generate-key` | POST | PayPal webhook: verifies signature, mints a key, saves the hash, emails the key |
+
+Free-tier limits are enforced server-side per hashed IP per day (3 summaries / 5 explains / 2 citations) as a backstop to the client-side limits. Every AI call retries twice before failing. Identical URLs serve cached summaries without touching the AI or the user's limit.
+
+## Quick local test (only needs the HF token)
+
+```bash
+cd backend
+python -m venv .venv && .venv\Scripts\activate
+pip install -r requirements.txt uvicorn
+copy .env.example .env        # paste your HF_TOKEN, leave the rest for later
+uvicorn api.index:app --env-file .env
+```
+
+Supabase/PayPal/SMTP can stay unconfigured for local testing — caching, analytics, and server-side limits switch off gracefully; summarize/explain/cite still work.
 
 ## Going live — checklist
 

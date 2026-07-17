@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { useApp } from '../../AppContext';
 import { PRICE_LABEL } from '../../config';
+import { rewriteText } from '../../lib/api';
+import { SkeletonLines } from '../Skeleton';
 
 const TOOLS = [
   {
@@ -30,10 +32,42 @@ const TOOLS = [
 ];
 
 export default function WriterTab() {
-  const { isPro, openUpgrade } = useApp();
+  const { isPro, license, openUpgrade } = useApp();
   const [active, setActive] = useState('humanize');
   const [input, setInput] = useState('');
+  const [state, setState] = useState('idle'); // idle | loading | done | error
+  const [output, setOutput] = useState('');
+  const [error, setError] = useState('');
+  const [copied, setCopied] = useState(false);
   const tool = TOOLS.find((t) => t.id === active);
+
+  const switchTool = (id) => {
+    setActive(id);
+    setState('idle');
+    setOutput('');
+    setError('');
+  };
+
+  const run = async () => {
+    if (!input.trim()) return;
+    setState('loading');
+    setOutput('');
+    setError('');
+    try {
+      const res = await rewriteText({ mode: active, text: input, licenseKey: license.key });
+      setOutput(res.result);
+      setState('done');
+    } catch (err) {
+      setError(err.message || 'Something went wrong. Please try again.');
+      setState('error');
+    }
+  };
+
+  const copyOutput = async () => {
+    await navigator.clipboard.writeText(output);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
 
   return (
     <div className="space-y-3 py-2">
@@ -41,7 +75,7 @@ export default function WriterTab() {
         {TOOLS.map((t) => (
           <button
             key={t.id}
-            onClick={() => setActive(t.id)}
+            onClick={() => switchTool(t.id)}
             className={`chip flex-1 justify-center py-2 ${active === t.id ? 'chip-active' : ''}`}
           >
             {t.icon} {t.name.split(' ')[0]}
@@ -75,12 +109,45 @@ export default function WriterTab() {
 
         {isPro ? (
           <>
-            <button className="btn-primary mt-2.5" disabled={!input.trim()}>
-              {tool.icon} {tool.cta}
+            <button
+              onClick={run}
+              className="btn-primary mt-2.5"
+              disabled={!input.trim() || state === 'loading'}
+            >
+              {state === 'loading' ? (
+                <>
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                  Rewriting…
+                </>
+              ) : (
+                <>
+                  {tool.icon} {tool.cta}
+                </>
+              )}
             </button>
-            <p className="mt-2 text-center text-[10.5px] text-slate-500">
-              This Pro tool goes live with the backend in the upcoming build steps.
-            </p>
+
+            {state === 'loading' && (
+              <div className="mt-3">
+                <SkeletonLines lines={4} />
+              </div>
+            )}
+
+            {state === 'error' && (
+              <p className="animate-fade-in mt-2.5 text-center text-[11.5px] font-medium text-rose-400">
+                {error}
+              </p>
+            )}
+
+            {state === 'done' && output && (
+              <div className="animate-slide-up mt-3 rounded-xl border border-brand-violet/20 bg-brand-violet/[0.07] p-3">
+                <p className="whitespace-pre-wrap text-[12.5px] leading-relaxed text-slate-200">
+                  {output}
+                </p>
+                <button onClick={copyOutput} className="chip mt-2.5">
+                  {copied ? '✓ Copied' : 'Copy result'}
+                </button>
+              </div>
+            )}
           </>
         ) : (
           <div className="animate-fade-in mt-3 rounded-xl border border-brand-violet/25 bg-gradient-to-br from-brand-violet/[0.12] to-brand-blue/[0.08] p-4 text-center">

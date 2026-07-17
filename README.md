@@ -69,9 +69,10 @@ Chrome for Android/iOS does **not** support extensions. Working options:
 
 ## Demo mode & the subscription system
 
-`DEMO_MODE = true` in `src/config.js` returns realistic mock **AI** responses
-(summarize/explain/cite) until the Claude endpoints ship. Set it to `false`
-and point `API_BASE` at your Vercel deployment when they're live.
+The AI endpoints are live (Hugging Face → Qwen2.5-72B-Instruct), so
+`DEMO_MODE = false` in `src/config.js`. `API_BASE` points at a local backend
+(`http://127.0.0.1:8000`) for development — switch it to your Vercel URL after
+deploying. Flip `DEMO_MODE = true` only to demo the UI without a backend.
 
 The **subscription/license system is real** (no demo path): "Upgrade" opens
 the PayPal checkout for the plan in `PAYPAL_PLAN_ID`, PayPal's webhook makes

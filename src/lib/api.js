@@ -89,6 +89,15 @@ export async function explainTerm({ term, context, licenseKey }) {
   return post('/explain', { term, context }, licenseKey);
 }
 
+/** Pro writer tools: mode = 'humanize' | 'paraphrase' | 'polish'. */
+export async function rewriteText({ mode, text, licenseKey }) {
+  if (DEMO_MODE) {
+    await delay(1200);
+    return { result: `(demo ${mode}) ${text}` };
+  }
+  return post(`/${mode}`, { text }, licenseKey);
+}
+
 export async function generateCitation({ url, title, style, licenseKey }) {
   if (DEMO_MODE) {
     await delay(900);

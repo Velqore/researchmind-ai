@@ -1,13 +1,13 @@
 // Central configuration for ResearchMind AI.
 
-// FastAPI backend on Vercel — replace with your deployment URL in Step 3.
-export const API_BASE = 'https://researchmind-api.vercel.app';
+// FastAPI backend. Local for now — after deploying to Vercel, replace with
+// your deployment URL, e.g. 'https://researchmind-api.vercel.app'.
+export const API_BASE = 'http://127.0.0.1:8000';
 
-// Demo mode ONLY affects the AI features (summarize/explain/cite), which
-// return realistic mock responses until the Claude endpoints ship in the next
-// step. The subscription/license system is fully real and always hits the
-// backend. Set to false once the AI endpoints are live.
-export const DEMO_MODE = true;
+// Demo mode returns mock AI responses instead of calling the backend.
+// The AI endpoints are live now, so it's off; flip to true only to demo
+// the UI without a running backend.
+export const DEMO_MODE = false;
 
 // Real PayPal subscription checkout.
 // Create the $1.40 / 6-month plan in the PayPal dashboard (see backend/README.md)

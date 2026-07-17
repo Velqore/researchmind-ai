@@ -1,19 +1,29 @@
 """
 ResearchMind AI — FastAPI backend (Vercel serverless).
 
-Subscription / license system (this step):
+AI endpoints (Hugging Face Inference Providers, OpenAI-compatible router):
+  POST /summarize     — summarize page/document text (24h Supabase cache)
+  POST /explain       — explain an academic term simply
+  POST /cite          — generate an APA/MLA/Chicago citation
+  POST /humanize      — Pro: make AI text sound natural
+  POST /paraphrase    — Pro: plagiarism-safe rewrite
+  POST /polish        — Pro: grammar & clarity pass
+  POST /compare       — Pro: multi-paper comparison
+  POST /research-gap  — Pro: identify research gaps
+
+Subscription / license system:
   POST /validate-key   — validate a license key (hashed lookup in Supabase)
   POST /generate-key   — PayPal webhook: verify signature, mint key, email it
   GET  /health         — liveness probe
 
-AI endpoints (/summarize, /explain, /cite, …) ship in the next build step.
-
 All secrets come from environment variables (Vercel project settings):
+  HF_TOKEN, MODEL_ID,
   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
   PAYPAL_API_BASE, PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET, PAYPAL_WEBHOOK_ID,
   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, FROM_EMAIL
 """
 
+import asyncio
 import hashlib
 import os
 import secrets
@@ -49,6 +59,19 @@ PAYPAL_WEBHOOK_ID = os.environ.get("PAYPAL_WEBHOOK_ID", "")
 
 KEY_ALPHABET = "ABCDEFGHJKMNPQRSTVWXYZ23456789"  # no 0/O/1/I lookalikes
 LICENSE_DAYS = 180  # $1.40 per 6-month subscription cycle
+
+# Hugging Face Inference Providers — OpenAI-compatible chat completions router.
+# Swapping AI providers later (incl. Claude) = change these two env vars only.
+HF_TOKEN = os.environ.get("HF_TOKEN", "")
+MODEL_ID = os.environ.get("MODEL_ID", "Qwen/Qwen2.5-72B-Instruct")
+HF_CHAT_URL = "https://router.huggingface.co/v1/chat/completions"
+
+MAX_INPUT_CHARS = 60_000
+CACHE_HOURS = 24
+
+# Server-side free-tier limits (per hashed IP per UTC day) — a backstop for
+# the client-side chrome.storage limits, so a modified client can't bypass them.
+FREE_DAILY_LIMITS = {"summarize": 3, "explain": 5, "cite": 2}
 
 
 def require_env(*pairs: tuple[str, str]) -> None:
@@ -107,6 +130,153 @@ def hash_key(key: str) -> str:
 
 def hash_ip(ip: str) -> str:
     return hashlib.sha256(ip.encode()).hexdigest()[:32]
+
+
+def client_ip(request: Request) -> str:
+    return request.headers.get("x-forwarded-for", "0.0.0.0").split(",")[0].strip()
+
+
+# ------------------------------------------------------------------------- ai
+
+
+async def llm_chat(system: str, user: str, max_tokens: int = 1200) -> str:
+    """One chat completion against the HF router, retrying twice on failure."""
+    require_env(("HF_TOKEN", HF_TOKEN))
+    payload = {
+        "model": MODEL_ID,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user[:MAX_INPUT_CHARS]},
+        ],
+        "max_tokens": max_tokens,
+        "temperature": 0.4,
+    }
+    async with httpx.AsyncClient(timeout=90) as client:
+        for attempt in range(3):  # 1 try + 2 retries
+            try:
+                r = await client.post(
+                    HF_CHAT_URL,
+                    headers={"Authorization": f"Bearer {HF_TOKEN}"},
+                    json=payload,
+                )
+                r.raise_for_status()
+                return r.json()["choices"][0]["message"]["content"].strip()
+            except Exception:
+                if attempt == 2:
+                    raise HTTPException(
+                        502, "The AI service is temporarily unavailable. Please try again."
+                    )
+                await asyncio.sleep(1.5 * (attempt + 1))
+
+
+# ------------------------------------------------------------ tier enforcement
+
+
+async def is_pro(request: Request) -> bool:
+    """True when the request carries a valid, unexpired license key."""
+    key = (request.headers.get("x-license-key") or "").strip().upper()
+    if len(key.replace("-", "")) != 16 or not SUPABASE_URL:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            rows = await sb_select(
+                client,
+                "license_keys",
+                f"key_hash=eq.{hash_key(key)}&is_active=eq.true&select=expires_at",
+            )
+        if not rows:
+            return False
+        expires = datetime.fromisoformat(rows[0]["expires_at"].replace("Z", "+00:00"))
+        return expires > datetime.now(timezone.utc)
+    except Exception:
+        return False
+
+
+async def enforce_tier(request: Request, feature: str, pro_only: bool = False) -> bool:
+    """Validate access + log usage. Returns the caller's pro status.
+
+    Free limits are enforced per hashed IP per UTC day via usage_logs.
+    If Supabase isn't configured (local dev), logging/limits degrade
+    gracefully — the client-side limits still apply.
+    """
+    pro = await is_pro(request)
+    if pro_only and not pro:
+        raise HTTPException(
+            403, "This is a Pro feature. Upgrade for $1.40 / 6 months to unlock it."
+        )
+    if not SUPABASE_URL:
+        return pro
+    ip = hash_ip(client_ip(request))
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            if not pro and feature in FREE_DAILY_LIMITS:
+                today = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00")
+                rows = await sb_select(
+                    client,
+                    "usage_logs",
+                    f"ip_hash=eq.{ip}&feature=eq.{feature}"
+                    f"&created_at=gte.{today}&select=id",
+                )
+                if len(rows) >= FREE_DAILY_LIMITS[feature]:
+                    raise HTTPException(
+                        429,
+                        "You've used all your free requests today. "
+                        "Unlock unlimited access for just $1.40 for 6 months 🚀",
+                    )
+            await sb_insert(
+                client,
+                "usage_logs",
+                {"feature": feature, "ip_hash": ip, "key_hash": None},
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        pass  # analytics must never break the request
+    return pro
+
+
+# -------------------------------------------------------------------- caching
+
+
+def url_hash(url: str) -> str:
+    return hashlib.sha256(url.encode()).hexdigest()
+
+
+async def cache_get(url: str, length: str) -> str | None:
+    if not SUPABASE_URL or not url:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            now = datetime.now(timezone.utc).isoformat()
+            rows = await sb_select(
+                client,
+                "cached_summaries",
+                f"url_hash=eq.{url_hash(url + ':' + length)}"
+                f"&expires_at=gt.{now}&select=summary",
+            )
+        return rows[0]["summary"] if rows else None
+    except Exception:
+        return None
+
+
+async def cache_put(url: str, length: str, summary: str) -> None:
+    if not SUPABASE_URL or not url:
+        return
+    try:
+        expires = datetime.now(timezone.utc) + timedelta(hours=CACHE_HOURS)
+        async with httpx.AsyncClient(timeout=8) as client:
+            r = await client.post(
+                f"{SUPABASE_URL}/rest/v1/cached_summaries",
+                headers={**sb_headers(), "Prefer": "resolution=merge-duplicates"},
+                json={
+                    "url_hash": url_hash(url + ":" + length),
+                    "summary": summary,
+                    "expires_at": expires.isoformat(),
+                },
+            )
+            r.raise_for_status()
+    except Exception:
+        pass  # cache failures must never break the request
 
 
 # ---------------------------------------------------------------------- email
@@ -351,3 +521,190 @@ async def generate_key(request: Request):
 
         # CANCELLED/SUSPENDED: user keeps access until the paid period expires.
         return {"status": "ignored"}
+
+
+# --------------------------------------------------------------- AI endpoints
+
+SUMMARY_STYLES = {
+    "short": (
+        "Write a 2-4 sentence TL;DR. Start with '**TL;DR** — '. "
+        "Plain, precise language a busy researcher can absorb in seconds."
+    ),
+    "medium": (
+        "Structure the summary as markdown with exactly these sections:\n"
+        "**Overview** — 1-2 sentences on what this is.\n"
+        "**Key points** — 3-5 bullet lines, each starting with '• '.\n"
+        "**Why it matters** — 1-2 sentences on significance.\n"
+        "Keep it under 250 words."
+    ),
+    "detailed": (
+        "Structure the summary as markdown with exactly these sections:\n"
+        "**Overview** — 2-3 sentences.\n"
+        "**Method / approach** — bullet lines starting with '• '.\n"
+        "**Results / findings** — bullet lines starting with '• '.\n"
+        "**Limitations & impact** — a short paragraph.\n"
+        "Keep it under 500 words."
+    ),
+}
+
+
+class SummarizeRequest(BaseModel):
+    text: str
+    url: str = ""
+    title: str = ""
+    length: str = "medium"
+
+
+@app.post("/summarize")
+async def summarize(body: SummarizeRequest, request: Request):
+    text = body.text.strip()
+    if len(text) < 40:
+        raise HTTPException(400, "Not enough readable text on this page to summarize.")
+    length = body.length if body.length in SUMMARY_STYLES else "medium"
+
+    # Cached result costs the user nothing and skips their daily limit.
+    cached = await cache_get(body.url, length)
+    if cached:
+        return {"summary": cached, "cached": True}
+
+    await enforce_tier(request, "summarize")
+    summary = await llm_chat(
+        "You are ResearchMind, an expert research assistant. Summarize accurately — "
+        "never invent facts, numbers, or citations not present in the text. "
+        "Use **bold** for section headers and '• ' for bullets. " + SUMMARY_STYLES[length],
+        f"Title: {body.title}\n\nContent:\n{text}",
+        max_tokens=900,
+    )
+    await cache_put(body.url, length, summary)
+    return {"summary": summary, "cached": False}
+
+
+class ExplainRequest(BaseModel):
+    term: str
+    context: str = ""
+
+
+@app.post("/explain")
+async def explain(body: ExplainRequest, request: Request):
+    term = body.term.strip()[:200]
+    if not term:
+        raise HTTPException(400, "No term provided.")
+    await enforce_tier(request, "explain")
+    explanation = await llm_chat(
+        "You are ResearchMind, an expert at explaining academic jargon. "
+        "Explain the term in plain language a smart undergraduate would understand. "
+        "Format: '**{term}**' on the first line, then 2-4 short sentences, "
+        "then one line starting with '• ' giving a concrete example or analogy. "
+        "Under 120 words total.",
+        f"Term: {term}" + (f"\n\nSurrounding context:\n{body.context[:2000]}" if body.context else ""),
+        max_tokens=300,
+    )
+    return {"explanation": explanation}
+
+
+class CiteRequest(BaseModel):
+    url: str
+    title: str = ""
+    style: str = "APA"
+
+
+@app.post("/cite")
+async def cite(body: CiteRequest, request: Request):
+    style = body.style if body.style in ("APA", "MLA", "Chicago") else "APA"
+    await enforce_tier(request, "cite")
+    today = datetime.now(timezone.utc).strftime("%B %d, %Y")
+    citation = await llm_chat(
+        f"You generate {style}-style citations for web sources. "
+        "Return ONLY the citation text — no preamble, no quotes, no explanation. "
+        "If author or publication date are unknown, follow the style's rules for "
+        "missing information rather than inventing them.",
+        f"Title: {body.title or 'Unknown'}\nURL: {body.url}\nAccessed: {today}",
+        max_tokens=200,
+    )
+    return {"citation": citation, "style": style}
+
+
+class TextRequest(BaseModel):
+    text: str
+
+
+WRITER_TOOLS = {
+    "humanize": (
+        "Rewrite the text so it reads as natural, warm human writing: vary sentence "
+        "length, use contractions where natural, remove robotic transitions and "
+        "AI clichés. Preserve the meaning, facts, and approximate length. "
+        "Return ONLY the rewritten text."
+    ),
+    "paraphrase": (
+        "Paraphrase the text completely: new sentence structures and vocabulary "
+        "while preserving the exact meaning and all facts. The result must not "
+        "reuse distinctive phrases from the original. Return ONLY the rewritten text."
+    ),
+    "polish": (
+        "Fix grammar, spelling, and punctuation, and sharpen clarity — but keep the "
+        "author's voice, tone, and structure. Change as little as possible. "
+        "Return ONLY the corrected text."
+    ),
+}
+
+
+def writer_endpoint(mode: str):
+    async def handler(body: TextRequest, request: Request):
+        text = body.text.strip()
+        if len(text) < 20:
+            raise HTTPException(400, "Please provide at least a sentence of text.")
+        await enforce_tier(request, mode, pro_only=True)
+        result = await llm_chat(WRITER_TOOLS[mode], text, max_tokens=1500)
+        return {"result": result}
+
+    return handler
+
+
+app.post("/humanize")(writer_endpoint("humanize"))
+app.post("/paraphrase")(writer_endpoint("paraphrase"))
+app.post("/polish")(writer_endpoint("polish"))
+
+
+class PapersRequest(BaseModel):
+    papers: list[str]
+
+
+@app.post("/compare")
+async def compare(body: PapersRequest, request: Request):
+    papers = [p.strip()[:20_000] for p in body.papers if p.strip()][:4]
+    if len(papers) < 2:
+        raise HTTPException(400, "Provide at least two papers to compare.")
+    await enforce_tier(request, "compare", pro_only=True)
+    joined = "\n\n---PAPER BREAK---\n\n".join(
+        f"PAPER {i + 1}:\n{p}" for i, p in enumerate(papers)
+    )
+    result = await llm_chat(
+        "You are ResearchMind. Compare the provided papers as markdown: "
+        "**Shared ground** (bullets with '• '), **Key differences** (bullets), "
+        "**Methodological comparison** (bullets), **Verdict** (2-3 sentences on "
+        "which is stronger for what purpose). Never invent findings.",
+        joined,
+        max_tokens=1200,
+    )
+    return {"comparison": result}
+
+
+@app.post("/research-gap")
+async def research_gap(body: PapersRequest, request: Request):
+    papers = [p.strip()[:20_000] for p in body.papers if p.strip()][:4]
+    if not papers:
+        raise HTTPException(400, "Provide at least one paper.")
+    await enforce_tier(request, "research_gap", pro_only=True)
+    joined = "\n\n---PAPER BREAK---\n\n".join(
+        f"PAPER {i + 1}:\n{p}" for i, p in enumerate(papers)
+    )
+    result = await llm_chat(
+        "You are ResearchMind, an expert research strategist. From the provided "
+        "paper(s), identify genuine research gaps as markdown: **Open questions** "
+        "(bullets with '• '), **Underexplored angles** (bullets), **Suggested next "
+        "studies** (2-3 bullets, each a concrete study design). Ground every gap in "
+        "what the papers actually say or omit.",
+        joined,
+        max_tokens=1000,
+    )
+    return {"gaps": result}
