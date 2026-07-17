@@ -35,6 +35,7 @@ from email.mime.text import MIMEText
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 app = FastAPI(title="ResearchMind AI API", version="1.0.0")
@@ -385,13 +386,40 @@ async def verify_paypal_webhook(client: httpx.AsyncClient, request: Request, eve
 # ------------------------------------------------------------------ endpoints
 
 
-@app.get("/")
+@app.get("/", response_class=HTMLResponse)
 async def root():
-    return {
-        "service": "ResearchMind AI API",
-        "status": "ok",
-        "docs": "https://github.com/Velqore/researchmind-ai#readme",
-    }
+    """Human-friendly status page — the real consumers of this API are the
+    Chrome extension's JSON endpoints below."""
+    return """<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ResearchMind AI — API</title>
+<style>
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+    font-family:Inter,system-ui,sans-serif;color:#e5e1f2;
+    background:radial-gradient(60% 45% at 15% -10%,rgba(139,92,246,.3),transparent 60%),
+    radial-gradient(55% 40% at 95% 0%,rgba(59,130,246,.24),transparent 60%),#0a0714}
+  .card{max-width:430px;margin:24px;padding:36px 32px;border-radius:24px;text-align:center;
+    border:1px solid rgba(255,255,255,.09);background:rgba(255,255,255,.04)}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#34d399;
+    margin-right:8px;box-shadow:0 0 12px #34d399}
+  h1{font-size:22px;margin:14px 0 6px}
+  .grad{background:linear-gradient(120deg,#c4b5fd,#60a5fa);-webkit-background-clip:text;
+    background-clip:text;color:transparent}
+  p{font-size:14px;line-height:1.6;color:#94a3b8;margin:10px 0}
+  code{background:rgba(255,255,255,.07);padding:2px 8px;border-radius:8px;font-size:12.5px}
+  a{color:#a78bfa}
+</style></head><body><div class="card">
+  <div><span class="dot"></span><span style="font-size:13px;font-weight:600;color:#34d399">API RUNNING</span></div>
+  <h1>ResearchMind <span class="grad">AI</span> — Engine</h1>
+  <p>This server is the invisible engine behind the ResearchMind AI Chrome
+     extension. It has no pages to browse — it answers JSON requests like
+     <code>/summarize</code>, <code>/explain</code> and <code>/cite</code>
+     sent by the extension.</p>
+  <p>To use ResearchMind, install the Chrome extension and click its icon
+     on any article or paper.</p>
+  <p><a href="https://github.com/Velqore/researchmind-ai#readme">Source &amp; documentation</a></p>
+</div></body></html>"""
 
 
 @app.get("/health")
