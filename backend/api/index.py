@@ -26,8 +26,10 @@ All secrets come from environment variables (Vercel project settings):
 import asyncio
 import hashlib
 import os
+import re
 import secrets
 import smtplib
+from urllib.parse import urlparse
 from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -585,8 +587,51 @@ SUMMARY_STYLES = {
 }
 
 
+async def fetch_page_text(url: str) -> tuple[str, str]:
+    """Server-side page fetch for the web app (browsers can't cross-origin
+    fetch arbitrary sites). Returns (title, text). Basic SSRF guard: http(s)
+    only, no local/private hosts."""
+    p = urlparse(url)
+    host = (p.hostname or "").lower()
+    if p.scheme not in ("http", "https") or not host:
+        raise HTTPException(400, "Please enter a valid http(s) URL.")
+    if (
+        host in ("localhost", "0.0.0.0")
+        or host.startswith(("127.", "10.", "192.168.", "169.254.", "172.16.", "172.17."))
+        or host.endswith((".local", ".internal"))
+    ):
+        raise HTTPException(400, "That URL can't be fetched.")
+    try:
+        async with httpx.AsyncClient(
+            timeout=20,
+            follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; ResearchMindBot/1.0)"},
+        ) as client:
+            r = await client.get(url)
+            r.raise_for_status()
+            html = r.text[:800_000]
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(
+            400, "Couldn't fetch that URL — check the link, or paste the text instead."
+        )
+    title_m = re.search(r"(?is)<title[^>]*>(.*?)</title>", html)
+    html = re.sub(
+        r"(?is)<(script|style|noscript|nav|footer|header|aside|svg)[^>]*>.*?</\1>", " ", html
+    )
+    text = re.sub(r"(?s)<[^>]+>", " ", html)
+    for ent, ch in (("&nbsp;", " "), ("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"),
+                    ("&quot;", '"'), ("&#39;", "'"), ("&#160;", " ")):
+        text = text.replace(ent, ch)
+    text = re.sub(r"[ \t\r\f]+", " ", text)
+    text = re.sub(r"\n\s*\n+", "\n\n", text).strip()
+    title = re.sub(r"\s+", " ", title_m.group(1)).strip() if title_m else url
+    return title, text[:MAX_INPUT_CHARS]
+
+
 class SummarizeRequest(BaseModel):
-    text: str
+    text: str = ""
     url: str = ""
     title: str = ""
     length: str = "medium"
@@ -595,25 +640,32 @@ class SummarizeRequest(BaseModel):
 @app.post("/summarize")
 async def summarize(body: SummarizeRequest, request: Request):
     text = body.text.strip()
-    if len(text) < 40:
-        raise HTTPException(400, "Not enough readable text on this page to summarize.")
+    title = body.title
     length = body.length if body.length in SUMMARY_STYLES else "medium"
 
     # Cached result costs the user nothing and skips their daily limit.
     cached = await cache_get(body.url, length)
     if cached:
-        return {"summary": cached, "cached": True}
+        return {"summary": cached, "cached": True, "title": title or body.url}
 
     await enforce_tier(request, "summarize")
+
+    # Web app sends only a URL — fetch and extract the page server-side.
+    if len(text) < 40 and body.url:
+        fetched_title, text = await fetch_page_text(body.url)
+        title = title or fetched_title
+    if len(text) < 40:
+        raise HTTPException(400, "Not enough readable text on this page to summarize.")
+
     summary = await llm_chat(
         "You are ResearchMind, an expert research assistant. Summarize accurately — "
         "never invent facts, numbers, or citations not present in the text. "
         "Use **bold** for section headers and '• ' for bullets. " + SUMMARY_STYLES[length],
-        f"Title: {body.title}\n\nContent:\n{text}",
+        f"Title: {title}\n\nContent:\n{text}",
         max_tokens=900,
     )
     await cache_put(body.url, length, summary)
-    return {"summary": summary, "cached": False}
+    return {"summary": summary, "cached": False, "title": title or body.url}
 
 
 class ExplainRequest(BaseModel):

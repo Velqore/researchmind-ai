@@ -5,6 +5,11 @@
 export const isExtension =
   typeof chrome !== 'undefined' && !!chrome.storage?.local;
 
+// Running as the web app (Vercel deployment / dev preview) rather than
+// inside the Chrome extension. Web mode swaps "current page" actions for
+// URL / paste inputs, since a website can't read other tabs.
+export const isWeb = !isExtension;
+
 export async function storageGet(key) {
   if (isExtension) {
     const data = await chrome.storage.local.get(key);

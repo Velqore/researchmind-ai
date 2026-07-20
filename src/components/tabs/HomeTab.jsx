@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import { useApp } from '../../AppContext';
 import { getCurrentPage, summarize } from '../../lib/api';
 import { ACCEPT_ATTR, extractErrorMessage, extractFromFile } from '../../lib/extract';
+import { isWeb } from '../../lib/storage';
 import ErrorCard from '../ErrorCard';
 import LimitBanner from '../LimitBanner';
 import RichText from '../RichText';
@@ -31,6 +32,9 @@ export default function HomeTab() {
   const [fileError, setFileError] = useState('');
   const [dragging, setDragging] = useState(false);
 
+  // Web mode: summarize a pasted link (the backend fetches it server-side)
+  const [urlInput, setUrlInput] = useState('');
+
   const left = remainingFor('summarize');
   const limitHit = !isPro && left === 0;
 
@@ -57,7 +61,7 @@ export default function HomeTab() {
         setState('idle');
         return;
       }
-      setResult({ ...res, pageTitle: source.title, url: source.url });
+      setResult({ ...res, pageTitle: source.title || res.title, url: source.url });
       setState('done');
     } catch {
       setErrorKind('server');
@@ -78,6 +82,17 @@ export default function HomeTab() {
   };
 
   const summarizeDoc = () => doc && runSummarize(doc);
+
+  const summarizeUrl = () => {
+    const url = urlInput.trim();
+    if (!/^https?:\/\/\S+\.\S+/.test(url)) {
+      setErrorKind('server');
+      setFileError('Please enter a full link starting with http:// or https://');
+      return;
+    }
+    setFileError('');
+    runSummarize({ url, title: '', text: '' });
+  };
 
   const handleFile = async (file) => {
     if (!file) return;
@@ -139,22 +154,52 @@ export default function HomeTab() {
         ) : (
           <>
             {/* Page mode and document mode are mutually exclusive — with a
-                document loaded, its card below is the single primary action. */}
+                document loaded, its card below is the single primary action.
+                Web mode swaps "current page" for a link input (a website
+                can't read other tabs — the backend fetches the URL). */}
             {!doc && !extracting && (
-              <button
-                onClick={summarizePage}
-                disabled={state === 'loading'}
-                className="btn-primary"
-              >
-                {state === 'loading' ? (
-                  <>
-                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                    Reading & summarizing…
-                  </>
-                ) : (
-                  <>✨ Summarize current page</>
-                )}
-              </button>
+              isWeb ? (
+                <>
+                  <input
+                    value={urlInput}
+                    onChange={(e) => setUrlInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && summarizeUrl()}
+                    placeholder="Paste a link — article, paper, blog post…"
+                    spellCheck={false}
+                    className="input-dark"
+                    aria-label="Link to summarize"
+                  />
+                  <button
+                    onClick={summarizeUrl}
+                    disabled={state === 'loading' || !urlInput.trim()}
+                    className="btn-primary mt-2.5"
+                  >
+                    {state === 'loading' ? (
+                      <>
+                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                        Reading & summarizing…
+                      </>
+                    ) : (
+                      <>✨ Summarize link</>
+                    )}
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={summarizePage}
+                  disabled={state === 'loading'}
+                  className="btn-primary"
+                >
+                  {state === 'loading' ? (
+                    <>
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                      Reading & summarizing…
+                    </>
+                  ) : (
+                    <>✨ Summarize current page</>
+                  )}
+                </button>
+              )
             )}
 
             {/* ---- Document upload ---- */}

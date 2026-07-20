@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../../AppContext';
 import { explainTerm, generateCitation, getCurrentPage, getSelection } from '../../lib/api';
+import { isWeb } from '../../lib/storage';
 import ErrorCard from '../ErrorCard';
 import LimitBanner from '../LimitBanner';
 import RichText from '../RichText';
@@ -34,6 +35,7 @@ export default function ResearchTab() {
 
   // --- Citation generator ---
   const [style, setStyle] = useState('APA');
+  const [citeUrl, setCiteUrl] = useState(''); // web mode: user provides the link
   const [citeState, setCiteState] = useState('idle');
   const [citation, setCitation] = useState(null);
   const [citeCopied, setCiteCopied] = useState(false);
@@ -73,10 +75,16 @@ export default function ResearchTab() {
       setCiteState('offline');
       return;
     }
+    let page;
+    if (isWeb) {
+      const url = citeUrl.trim();
+      if (!/^https?:\/\/\S+\.\S+/.test(url)) return;
+      page = { url, title: '' };
+    }
     setCiteState('loading');
     setCitation(null);
     try {
-      const page = await getCurrentPage();
+      if (!isWeb) page = await getCurrentPage();
       const res = await generateCitation({
         url: page.url,
         title: page.title,
@@ -128,13 +136,15 @@ export default function ResearchTab() {
                 className="input-dark"
                 aria-label="Term to explain"
               />
-              <button
-                onClick={grabSelection}
-                className="btn-ghost shrink-0 px-3"
-                title="Use highlighted text from the page"
-              >
-                ⤵
-              </button>
+              {!isWeb && (
+                <button
+                  onClick={grabSelection}
+                  className="btn-ghost shrink-0 px-3"
+                  title="Use highlighted text from the page"
+                >
+                  ⤵
+                </button>
+              )}
             </div>
             <button
               onClick={handleExplain}
@@ -180,6 +190,17 @@ export default function ResearchTab() {
           <LimitBanner message="You've used all your free citations today. Unlock unlimited access for just $1.40 for 6 months 🚀" />
         ) : (
           <>
+            {isWeb && (
+              <input
+                value={citeUrl}
+                onChange={(e) => setCiteUrl(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleCite()}
+                placeholder="Paste the link to cite…"
+                spellCheck={false}
+                className="input-dark mb-2.5"
+                aria-label="Link to cite"
+              />
+            )}
             <div className="mb-2.5 flex gap-1.5" role="radiogroup" aria-label="Citation style">
               {CITE_STYLES.map((s) => (
                 <button
@@ -195,7 +216,7 @@ export default function ResearchTab() {
             </div>
             <button
               onClick={handleCite}
-              disabled={citeState === 'loading'}
+              disabled={citeState === 'loading' || (isWeb && !citeUrl.trim())}
               className="btn-primary"
             >
               {citeState === 'loading' ? 'Generating…' : `Generate ${style} citation`}

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useApp } from '../../AppContext';
 import { getCurrentPage, getSelection } from '../../lib/api';
 import { addHighlight, getHighlights, removeHighlight } from '../../lib/highlights';
+import { isWeb } from '../../lib/storage';
 import LimitBanner from '../LimitBanner';
 import UsageBar from '../UsageBar';
 
@@ -10,6 +11,7 @@ export default function LibraryTab() {
   const [highlights, setHighlights] = useState([]);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
+  const [noteText, setNoteText] = useState(''); // web mode: paste-a-note
 
   useEffect(() => {
     getHighlights().then(setHighlights);
@@ -47,6 +49,17 @@ export default function LibraryTab() {
     }
   };
 
+  const saveNote = async () => {
+    const text = noteText.trim();
+    if (!text) return;
+    const allowed = await useFeature('highlight');
+    if (!allowed) return;
+    const updated = await addHighlight({ text, url: '', title: 'Saved note' });
+    setHighlights(updated);
+    setNoteText('');
+    flash('✓ Note saved');
+  };
+
   const remove = async (id) => {
     setHighlights(await removeHighlight(id));
   };
@@ -56,9 +69,13 @@ export default function LibraryTab() {
       <div className="glass p-4">
         <div className="mb-2.5 flex items-start justify-between">
           <div>
-            <h2 className="text-[13.5px] font-bold text-white">Save a highlight</h2>
+            <h2 className="text-[13.5px] font-bold text-white">
+              {isWeb ? 'Save a note' : 'Save a highlight'}
+            </h2>
             <p className="mt-0.5 text-[11.5px] text-slate-400">
-              Select text on the page, then save it to your library
+              {isWeb
+                ? 'Paste a quote, finding, or idea to keep it in your library'
+                : 'Select text on the page, then save it to your library'}
             </p>
           </div>
           <span className="text-xl">🖍️</span>
@@ -66,6 +83,27 @@ export default function LibraryTab() {
 
         {limitHit ? (
           <LimitBanner message="You've saved all your free highlights today. Unlock unlimited access for just $1.40 for 6 months 🚀" />
+        ) : isWeb ? (
+          <>
+            <textarea
+              value={noteText}
+              onChange={(e) => setNoteText(e.target.value)}
+              placeholder="Paste or type something worth keeping…"
+              rows={3}
+              className="input-dark resize-none"
+              aria-label="Note to save"
+            />
+            <button
+              onClick={saveNote}
+              disabled={!noteText.trim()}
+              className="btn-primary mt-2.5"
+            >
+              💾 Save to library
+            </button>
+            <div className="mt-3">
+              <UsageBar feature="highlight" />
+            </div>
+          </>
         ) : (
           <>
             <button onClick={saveSelection} disabled={saving} className="btn-primary">
