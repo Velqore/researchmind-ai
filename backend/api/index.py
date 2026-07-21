@@ -67,11 +67,27 @@ LICENSE_DAYS = 180  # $1.40 per 6-month subscription cycle
 # publishable (safe in client HTML). The SECRET stays server-side only.
 PAYPAL_PLAN_ID = os.environ.get("PAYPAL_PLAN_ID", "P-0HL98976NA5043041NJPSYHQ")
 
-# Hugging Face Inference Providers — OpenAI-compatible chat completions router.
-# Swapping AI providers later (incl. Claude) = change these two env vars only.
+# AI providers — all OpenAI-compatible chat-completions endpoints, tried in
+# order with automatic fallback so one provider being down/rate-limited never
+# takes the product offline. Groq is primary (free, fast, generous limits);
+# Hugging Face is the fallback. Set at least one key in the backend env.
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
+
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
 MODEL_ID = os.environ.get("MODEL_ID", "Qwen/Qwen2.5-72B-Instruct")
 HF_CHAT_URL = "https://router.huggingface.co/v1/chat/completions"
+
+
+def ai_providers() -> list[tuple[str, str, str, str]]:
+    """(label, url, api_key, model) in priority order — Groq first, HF fallback."""
+    provs = []
+    if GROQ_API_KEY:
+        provs.append(("groq", GROQ_CHAT_URL, GROQ_API_KEY, GROQ_MODEL))
+    if HF_TOKEN:
+        provs.append(("hf", HF_CHAT_URL, HF_TOKEN, MODEL_ID))
+    return provs
 
 # Hugging Face free-tier inference reliably handles ~45k chars; beyond that it
 # returns 502s. Free users get a smaller cap; Pro users get the full safe max.
@@ -166,11 +182,9 @@ def client_ip(request: Request) -> str:
 # ------------------------------------------------------------------------- ai
 
 
-async def llm_chat(system: str, user: str, max_tokens: int = 1200) -> str:
-    """One chat completion against the HF router, retrying twice on failure."""
-    require_env(("HF_TOKEN", HF_TOKEN))
+async def _try_provider(client, url, key, model, system, user, max_tokens):
     payload = {
-        "model": MODEL_ID,
+        "model": model,
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": user[:HARD_MAX_INPUT_CHARS]},
@@ -178,22 +192,34 @@ async def llm_chat(system: str, user: str, max_tokens: int = 1200) -> str:
         "max_tokens": max_tokens,
         "temperature": 0.4,
     }
+    r = await client.post(url, headers={"Authorization": f"Bearer {key}"}, json=payload)
+    r.raise_for_status()
+    return r.json()["choices"][0]["message"]["content"].strip()
+
+
+async def llm_chat(system: str, user: str, max_tokens: int = 1200) -> str:
+    """Chat completion with multi-provider fallback. Tries each configured
+    provider (Groq → HF) twice before giving up, so a single provider being
+    rate-limited, out of credits, or down never takes the feature offline."""
+    provs = ai_providers()
+    if not provs:
+        raise HTTPException(500, "No AI provider configured — set GROQ_API_KEY or HF_TOKEN.")
+    last = ""
     async with httpx.AsyncClient(timeout=90) as client:
-        for attempt in range(3):  # 1 try + 2 retries
-            try:
-                r = await client.post(
-                    HF_CHAT_URL,
-                    headers={"Authorization": f"Bearer {HF_TOKEN}"},
-                    json=payload,
-                )
-                r.raise_for_status()
-                return r.json()["choices"][0]["message"]["content"].strip()
-            except Exception:
-                if attempt == 2:
-                    raise HTTPException(
-                        502, "The AI service is temporarily unavailable. Please try again."
-                    )
-                await asyncio.sleep(1.5 * (attempt + 1))
+        for label, url, key, model in provs:
+            for attempt in range(2):
+                try:
+                    return await _try_provider(client, url, key, model, system, user, max_tokens)
+                except httpx.HTTPStatusError as e:
+                    last = f"{label} HTTP {e.response.status_code}"
+                    # 4xx (bad key, quota) won't fix on retry — move to next provider
+                    if e.response.status_code < 500 and e.response.status_code != 429:
+                        break
+                    await asyncio.sleep(0.8 * (attempt + 1))
+                except Exception as e:
+                    last = f"{label} {type(e).__name__}"
+                    await asyncio.sleep(0.8 * (attempt + 1))
+    raise HTTPException(502, f"The AI service is temporarily unavailable ({last}). Please try again.")
 
 
 # ------------------------------------------------------------ tier enforcement
@@ -454,6 +480,31 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "researchmind-api"}
+
+
+@app.get("/diag")
+async def diag(key: str = ""):
+    """Admin-only provider health check: ?key=<ADMIN_KEY>. Reports which AI
+    providers are configured and which actually respond to a tiny request."""
+    if not ADMIN_KEY or key.strip().upper() != ADMIN_KEY:
+        raise HTTPException(403, "Admin key required.")
+    results = []
+    async with httpx.AsyncClient(timeout=30) as client:
+        for label, url, k, model in ai_providers():
+            try:
+                out = await _try_provider(client, url, k, model, "You are a test.", "Say OK.", 5)
+                results.append({"provider": label, "model": model, "ok": True, "sample": out[:30]})
+            except httpx.HTTPStatusError as e:
+                results.append({"provider": label, "model": model, "ok": False,
+                                "error": f"HTTP {e.response.status_code}", "body": e.response.text[:160]})
+            except Exception as e:
+                results.append({"provider": label, "model": model, "ok": False, "error": type(e).__name__})
+    return {
+        "providers_configured": [p[0] for p in ai_providers()],
+        "supabase": bool(SUPABASE_URL),
+        "admin_key_set": bool(ADMIN_KEY),
+        "results": results,
+    }
 
 
 @app.get("/checkout", response_class=HTMLResponse)
