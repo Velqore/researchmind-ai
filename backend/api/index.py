@@ -969,6 +969,22 @@ async def research_gap(body: PapersRequest, request: Request):
 # Each tool: (system prompt, max_tokens). All ground output in the user's own
 # pasted text so nothing is fabricated. {opt} is filled from the `option` field.
 PRO_TOOLS = {
+    "compare": (
+        "You are ResearchMind. Compare the provided papers as markdown: "
+        "**Shared ground** (bullets with '• '), **Key differences** (bullets), "
+        "**Methodological comparison** (bullets), **Verdict** (2-3 sentences on which "
+        "is stronger for what purpose). Never invent findings; compare only what the "
+        "sources state.",
+        1200,
+    ),
+    "research_gap": (
+        "You are ResearchMind, an expert research strategist. From the provided "
+        "source(s), identify genuine research gaps as markdown: **Open questions** "
+        "(bullets with '• '), **Underexplored angles** (bullets), **Suggested next "
+        "studies** (2-3 bullets, each a concrete study design). Ground every gap in "
+        "what the sources actually say or omit.",
+        1000,
+    ),
     "bibliography": (
         "You are ResearchMind. Turn the provided sources (titles, URLs, author/date "
         "notes) into a clean, alphabetically ordered reference list in the style the "
