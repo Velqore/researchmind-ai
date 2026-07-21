@@ -476,20 +476,39 @@ async def checkout():
     check your inbox (and spam) in a minute, then paste it into the ResearchMind
     Settings tab to unlock Pro.
   </div>
+  <div id="err" style="display:none;margin-top:14px;padding:14px;border-radius:12px;
+    background:rgba(244,63,94,.12);border:1px solid rgba(244,63,94,.3);
+    color:#fecaca;font-size:12px;line-height:1.55;text-align:left;word-break:break-word"></div>
   <p class="note">Secure payment via PayPal · Cancel anytime · License key sent by email</p>
 </div>
-<script src="https://www.paypal.com/sdk/js?client-id={PAYPAL_CLIENT_ID}&vault=true&intent=subscription"></script>
+<script src="https://www.paypal.com/sdk/js?client-id={PAYPAL_CLIENT_ID}&vault=true&intent=subscription&currency=USD"
+        data-page-type="checkout"
+        onerror="document.getElementById('err').style.display='block';document.getElementById('err').textContent='PayPal SDK failed to load. Check the Client ID or that the account is approved for Live payments.';"></script>
 <script>
-  paypal.Buttons({{
-    style: {{ shape: 'pill', color: 'blue', layout: 'vertical', label: 'subscribe' }},
-    createSubscription: function(data, actions) {{
-      return actions.subscription.create({{ plan_id: '{PAYPAL_PLAN_ID}' }});
-    }},
-    onApprove: function(data) {{
-      document.getElementById('paypal-button-container').style.display = 'none';
-      document.getElementById('success').style.display = 'block';
-    }}
-  }}).render('#paypal-button-container');
+  function showErr(msg) {{
+    var e = document.getElementById('err');
+    e.style.display = 'block';
+    e.textContent = 'PayPal error: ' + msg;
+  }}
+  if (window.paypal) {{
+    paypal.Buttons({{
+      style: {{ shape: 'pill', color: 'blue', layout: 'vertical', label: 'subscribe' }},
+      createSubscription: function(data, actions) {{
+        return actions.subscription.create({{ plan_id: '{PAYPAL_PLAN_ID}' }})
+          .catch(function(e) {{ showErr('could not create subscription — ' + (e && e.message ? e.message : e)); throw e; }});
+      }},
+      onApprove: function(data) {{
+        document.getElementById('paypal-button-container').style.display = 'none';
+        document.getElementById('success').style.display = 'block';
+      }},
+      onError: function(err) {{ showErr((err && err.message) ? err.message : String(err)); }},
+      onCancel: function() {{ showErr('payment was cancelled or the window closed before completing.'); }}
+    }}).render('#paypal-button-container').catch(function(e) {{
+      showErr('button failed to render — ' + (e && e.message ? e.message : e));
+    }});
+  }} else {{
+    showErr('SDK object not available.');
+  }}
 </script>
 </body></html>"""
 
