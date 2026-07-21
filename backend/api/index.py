@@ -73,8 +73,20 @@ HF_TOKEN = os.environ.get("HF_TOKEN", "")
 MODEL_ID = os.environ.get("MODEL_ID", "Qwen/Qwen2.5-72B-Instruct")
 HF_CHAT_URL = "https://router.huggingface.co/v1/chat/completions"
 
-MAX_INPUT_CHARS = 60_000
+# Hugging Face free-tier inference reliably handles ~45k chars; beyond that it
+# returns 502s. Cap well under that for fast, dependable summaries.
+MAX_INPUT_CHARS = 32_000
 CACHE_HOURS = 24
+
+
+def clamp_for_llm(text: str) -> str:
+    """Keep large documents within the reliable input size. For long text,
+    take the beginning AND end so a paper's intro and conclusion both survive."""
+    if len(text) <= MAX_INPUT_CHARS:
+        return text
+    head = int(MAX_INPUT_CHARS * 0.72)
+    tail = MAX_INPUT_CHARS - head - 40
+    return text[:head] + "\n\n[… middle omitted for length …]\n\n" + text[-tail:]
 
 # Server-side free-tier limits (per hashed IP per UTC day) — a backstop for
 # the client-side chrome.storage limits, so a modified client can't bypass them.
@@ -745,7 +757,7 @@ async def summarize(body: SummarizeRequest, request: Request):
         "You are ResearchMind, an expert research assistant. Summarize accurately — "
         "never invent facts, numbers, or citations not present in the text. "
         "Use **bold** for section headers and '• ' for bullets. " + SUMMARY_STYLES[length],
-        f"Title: {title}\n\nContent:\n{text}",
+        f"Title: {title}\n\nContent:\n{clamp_for_llm(text)}",
         max_tokens=900,
     )
     await cache_put(body.url, length, summary)
