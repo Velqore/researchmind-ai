@@ -12,7 +12,7 @@ export const DEMO_MODE = false;
 // Real PayPal subscription checkout.
 // Create the $1.40 / 6-month plan in the PayPal dashboard (see backend/README.md)
 // and paste its plan id here.
-export const PAYPAL_PLAN_ID = 'YOUR_PAYPAL_PLAN_ID';
+export const PAYPAL_PLAN_ID = 'P-0HL98976NA5043041NJPSYHQ';
 export const UPGRADE_URL = `https://www.paypal.com/webapps/billing/subscriptions?plan_id=${PAYPAL_PLAN_ID}`;
 
 export const PRICE_LABEL = '$1.40 / 6 months';
