@@ -12,25 +12,33 @@ export default {
     extend: {
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
+        display: ['Georgia', 'Times New Roman', 'serif'],
       },
       colors: {
+        // Midnight Observatory — cosmic navy grounds
         ink: {
-          950: '#0a0714',
-          900: '#0f0b1e',
-          800: '#171130',
-          700: '#221a45',
+          950: '#05070f',
+          900: '#080b16',
+          800: '#111726',
+          700: '#1b2338',
         },
+        // Warm-gold accents (names kept so existing utilities re-skin in place)
         brand: {
-          violet: '#8b5cf6',
-          purple: '#a855f7',
-          blue: '#3b82f6',
-          cyan: '#22d3ee',
+          violet: '#e3bd76', // gold
+          purple: '#c69a4c', // gold-deep
+          blue: '#caa24f', // antique gold
+          cyan: '#e0bd78', // gold-light
+        },
+        gold: {
+          DEFAULT: '#e3bd76',
+          light: '#f4d99a',
+          deep: '#c69a4c',
         },
       },
       boxShadow: {
-        glow: '0 0 24px rgba(139, 92, 246, 0.35)',
-        'glow-sm': '0 0 12px rgba(139, 92, 246, 0.25)',
-        card: '0 8px 32px rgba(0, 0, 0, 0.35)',
+        glow: '0 0 24px rgba(227, 189, 118, 0.38)',
+        'glow-sm': '0 0 12px rgba(227, 189, 118, 0.28)',
+        card: '0 18px 44px rgba(0, 0, 0, 0.5)',
       },
       animation: {
         'fade-in': 'fadeIn 0.25s ease-out both',
@@ -58,8 +66,8 @@ export default {
           to: { backgroundPosition: '-200% 0' },
         },
         pulseGlow: {
-          '0%, 100%': { boxShadow: '0 0 16px rgba(139, 92, 246, 0.25)' },
-          '50%': { boxShadow: '0 0 28px rgba(139, 92, 246, 0.5)' },
+          '0%, 100%': { boxShadow: '0 0 16px rgba(227, 189, 118, 0.28)' },
+          '50%': { boxShadow: '0 0 28px rgba(227, 189, 118, 0.55)' },
         },
         pop: {
           from: { opacity: '0', transform: 'scale(0.8)' },

@@ -16,12 +16,14 @@ export default function Header({ onOpenSettings }) {
   return (
     <header className="flex items-center justify-between px-4 pb-2 pt-3.5">
       <div className="flex items-center gap-2.5">
-        <Logo size={30} />
+        <Logo size={38} />
         <div className="leading-tight">
-          <h1 className="text-[15px] font-bold tracking-tight text-white">
+          <h1 className="font-display text-[16px] font-bold tracking-tight text-[#f5edda]">
             ResearchMind <span className="grad-text">AI</span>
           </h1>
-          <p className="text-[10.5px] font-medium text-slate-400">Your AI research copilot</p>
+          <p className="text-[10px] font-medium uppercase tracking-[0.16em] text-gold-deep/90">
+            AI Research Copilot
+          </p>
         </div>
       </div>
 
@@ -51,7 +53,7 @@ export default function Header({ onOpenSettings }) {
       ) : (
         <button
           onClick={openUpgrade}
-          className="grad animate-pulse-glow rounded-full px-3 py-1.5 text-[11px] font-bold text-white transition-transform duration-150 hover:scale-105 active:scale-95"
+          className="grad animate-pulse-glow rounded-full px-3 py-1.5 text-[11px] font-bold text-[#1c1204] transition-transform duration-150 hover:scale-105 active:scale-95"
         >
           ⚡ Upgrade
         </button>
