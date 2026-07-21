@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../../AppContext';
 import { PRICE_LABEL } from '../../config';
-import { openCheckout } from '../../lib/checkout';
 import { activateKey, deactivate, normalizeKey } from '../../lib/license';
 import { isExtension } from '../../lib/storage';
 
@@ -165,14 +164,16 @@ export default function SettingsTab() {
           </div>
         </div>
         <div className="mt-3 flex gap-2">
-          <button
-            onClick={openCheckout}
+          <a
+            href="https://www.paypal.com/myaccount/autopay/"
+            target="_blank"
+            rel="noreferrer"
             className="btn-ghost flex-1 text-center text-[11.5px]"
           >
             Manage subscription
-          </button>
+          </a>
           <a
-            href="mailto:support@researchmind.ai"
+            href="mailto:researchmindai@gmail.com?subject=ResearchMind%20Support"
             className="btn-ghost flex-1 text-center text-[11.5px]"
           >
             Support

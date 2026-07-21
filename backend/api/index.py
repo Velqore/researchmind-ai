@@ -494,8 +494,9 @@ async def test_email(key: str = "", to: str = ""):
     if not recipient:
         raise HTTPException(400, "Pass ?to=an-email-address.")
     try:
+        # Send the real admin key so the email doubles as your activation key.
         send_license_email(
-            recipient, "RMND-TEST-EMAIL-OK", datetime.now(timezone.utc) + timedelta(days=180)
+            recipient, ADMIN_KEY, datetime.now(timezone.utc) + timedelta(days=3650)
         )
         return {"sent": True, "to": recipient}
     except HTTPException:
