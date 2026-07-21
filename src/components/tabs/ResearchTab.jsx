@@ -1,6 +1,13 @@
 import React, { useState } from 'react';
 import { useApp } from '../../AppContext';
-import { explainTerm, generateCitation, getCurrentPage, getSelection } from '../../lib/api';
+import {
+  comparePapers,
+  explainTerm,
+  findResearchGaps,
+  generateCitation,
+  getCurrentPage,
+  getSelection,
+} from '../../lib/api';
 import { isWeb } from '../../lib/storage';
 import ErrorCard from '../ErrorCard';
 import LimitBanner from '../LimitBanner';
@@ -10,9 +17,10 @@ import UsageBar from '../UsageBar';
 
 const CITE_STYLES = ['APA', 'MLA', 'Chicago'];
 
+// Live Pro tools have a working backend and open the multi-paper panel.
 const PRO_TOOLS = [
-  { icon: '📊', name: 'Compare papers', desc: 'Side-by-side multi-paper analysis' },
-  { icon: '🧭', name: 'Research gaps', desc: 'Find unexplored angles in a field' },
+  { id: 'compare', icon: '📊', name: 'Compare papers', desc: 'Side-by-side multi-paper analysis', live: true },
+  { id: 'gaps', icon: '🧭', name: 'Research gaps', desc: 'Find unexplored angles in a field', live: true },
   { icon: '📖', name: 'Auto bibliography', desc: 'Build a full reference list' },
   { icon: '🎥', name: 'YouTube lectures', desc: 'Summarize any lecture video' },
   { icon: '💬', name: 'Chat with PDF', desc: 'Ask questions to any paper' },
@@ -107,6 +115,45 @@ export default function ResearchTab() {
     await navigator.clipboard.writeText(citation);
     setCiteCopied(true);
     setTimeout(() => setCiteCopied(false), 1500);
+  };
+
+  // --- Pro multi-paper tools (Compare / Research gaps) ---
+  const [tool, setTool] = useState(null); // 'compare' | 'gaps' | null
+  const [papers, setPapers] = useState(['', '']);
+  const [toolState, setToolState] = useState('idle'); // idle | loading | done | error
+  const [toolResult, setToolResult] = useState('');
+  const [soon, setSoon] = useState('');
+
+  const openTool = (t) => {
+    if (!isPro) return openUpgrade();
+    if (!t.live) {
+      setSoon(t.name);
+      setTimeout(() => setSoon(''), 2200);
+      return;
+    }
+    setTool(t.id);
+    setPapers(t.id === 'gaps' ? [''] : ['', '']);
+    setToolState('idle');
+    setToolResult('');
+  };
+
+  const runTool = async () => {
+    const filled = papers.map((p) => p.trim()).filter(Boolean);
+    const min = tool === 'gaps' ? 1 : 2;
+    if (filled.length < min) return;
+    setToolState('loading');
+    setToolResult('');
+    try {
+      const res =
+        tool === 'gaps'
+          ? await findResearchGaps({ papers: filled, licenseKey: license.key })
+          : await comparePapers({ papers: filled, licenseKey: license.key });
+      setToolResult(tool === 'gaps' ? res.gaps : res.comparison);
+      setToolState('done');
+    } catch (err) {
+      setToolResult(err.message || 'Something went wrong. Please try again.');
+      setToolState('error');
+    }
   };
 
   return (
@@ -257,25 +304,118 @@ export default function ResearchTab() {
             PRO
           </span>
         </h2>
-        <div className="grid grid-cols-2 gap-2">
-          {PRO_TOOLS.map((tool) => (
+
+        {tool ? (
+          /* ---- Live tool panel (Compare / Research gaps) ---- */
+          <div className="animate-fade-in">
+            <div className="mb-2.5 flex items-center justify-between">
+              <h3 className="text-[13.5px] font-bold text-white">
+                {tool === 'gaps' ? '🧭 Research gaps' : '📊 Compare papers'}
+              </h3>
+              <button
+                onClick={() => setTool(null)}
+                className="chip"
+                aria-label="Back to tools"
+              >
+                ← Back
+              </button>
+            </div>
+            <p className="mb-2.5 text-[11.5px] text-slate-400">
+              {tool === 'gaps'
+                ? 'Paste one or more papers (abstract or full text) to surface open questions.'
+                : 'Paste two or more papers to compare their methods and findings.'}
+            </p>
+
+            <div className="space-y-2">
+              {papers.map((p, idx) => (
+                <textarea
+                  key={idx}
+                  value={p}
+                  onChange={(e) => {
+                    const next = [...papers];
+                    next[idx] = e.target.value;
+                    setPapers(next);
+                  }}
+                  placeholder={`Paper ${idx + 1} — paste abstract or text…`}
+                  rows={3}
+                  className="input-dark resize-none"
+                  aria-label={`Paper ${idx + 1}`}
+                />
+              ))}
+            </div>
+
+            {papers.length < 4 && (
+              <button onClick={() => setPapers([...papers, ''])} className="chip mt-2">
+                ＋ Add another paper
+              </button>
+            )}
+
             <button
-              key={tool.name}
-              onClick={isPro ? undefined : openUpgrade}
-              className="glass-hover group relative rounded-xl border border-white/[0.06] bg-white/[0.03] p-3 text-left"
-              title={isPro ? 'Coming in the next build steps' : 'Upgrade to unlock'}
+              onClick={runTool}
+              disabled={toolState === 'loading'}
+              className="btn-primary mt-2.5"
             >
-              {!isPro && (
-                <span className="absolute right-2 top-2 text-[11px] opacity-60 transition-opacity group-hover:opacity-100">
-                  🔒
-                </span>
+              {toolState === 'loading' ? (
+                <>
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-black/30 border-t-black/80" />
+                  Analyzing…
+                </>
+              ) : tool === 'gaps' ? (
+                '🧭 Find research gaps'
+              ) : (
+                '📊 Compare papers'
               )}
-              <div className="text-lg">{tool.icon}</div>
-              <div className="mt-1 text-[12px] font-semibold text-slate-200">{tool.name}</div>
-              <div className="mt-0.5 text-[10.5px] leading-snug text-slate-500">{tool.desc}</div>
             </button>
-          ))}
-        </div>
+
+            {toolState === 'loading' && (
+              <div className="mt-3">
+                <SkeletonLines lines={4} />
+              </div>
+            )}
+            {toolState === 'error' && (
+              <p className="animate-fade-in mt-2.5 text-center text-[11.5px] font-medium text-rose-400">
+                {toolResult}
+              </p>
+            )}
+            {toolState === 'done' && toolResult && (
+              <div className="animate-slide-up mt-3 rounded-xl border border-brand-violet/20 bg-brand-violet/[0.07] p-3">
+                <RichText text={toolResult} />
+              </div>
+            )}
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-2">
+              {PRO_TOOLS.map((t) => (
+                <button
+                  key={t.name}
+                  onClick={() => openTool(t)}
+                  className="glass-hover group relative rounded-xl border border-white/[0.06] bg-white/[0.03] p-3 text-left"
+                  title={t.live ? t.name : isPro ? 'Coming soon' : 'Upgrade to unlock'}
+                >
+                  {!isPro && (
+                    <span className="absolute right-2 top-2 text-[11px] opacity-60 transition-opacity group-hover:opacity-100">
+                      🔒
+                    </span>
+                  )}
+                  {t.live && (
+                    <span className="absolute right-2 top-2 rounded bg-emerald-400/15 px-1 py-0.5 text-[8px] font-bold uppercase tracking-wide text-emerald-300">
+                      Live
+                    </span>
+                  )}
+                  <div className="text-lg">{t.icon}</div>
+                  <div className="mt-1 text-[12px] font-semibold text-slate-200">{t.name}</div>
+                  <div className="mt-0.5 text-[10.5px] leading-snug text-slate-500">{t.desc}</div>
+                </button>
+              ))}
+            </div>
+            {soon && (
+              <p className="animate-fade-in mt-3 text-center text-[11.5px] font-medium text-brand-cyan">
+                “{soon}” is coming soon — Compare papers &amp; Research gaps are live now ✨
+              </p>
+            )}
+          </>
+        )}
       </div>
     </div>
   );

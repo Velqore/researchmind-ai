@@ -98,6 +98,24 @@ export async function rewriteText({ mode, text, licenseKey }) {
   return post(`/${mode}`, { text }, licenseKey);
 }
 
+/** Pro: compare 2–4 papers. `papers` is an array of text blocks. */
+export async function comparePapers({ papers, licenseKey }) {
+  if (DEMO_MODE) {
+    await delay(1400);
+    return { comparison: '(demo) Comparison of the provided papers…' };
+  }
+  return post('/compare', { papers }, licenseKey);
+}
+
+/** Pro: identify research gaps from 1–4 papers. */
+export async function findResearchGaps({ papers, licenseKey }) {
+  if (DEMO_MODE) {
+    await delay(1400);
+    return { gaps: '(demo) Open questions and underexplored angles…' };
+  }
+  return post('/research-gap', { papers }, licenseKey);
+}
+
 export async function generateCitation({ url, title, style, licenseKey }) {
   if (DEMO_MODE) {
     await delay(900);
