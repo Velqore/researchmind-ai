@@ -63,6 +63,10 @@ PAYPAL_WEBHOOK_ID = os.environ.get("PAYPAL_WEBHOOK_ID", "")
 KEY_ALPHABET = "ABCDEFGHJKMNPQRSTVWXYZ23456789"  # no 0/O/1/I lookalikes
 LICENSE_DAYS = 180  # $1.40 per 6-month subscription cycle
 
+# Public PayPal identifiers used to render the subscription button. Both are
+# publishable (safe in client HTML). The SECRET stays server-side only.
+PAYPAL_PLAN_ID = os.environ.get("PAYPAL_PLAN_ID", "P-0HL98976NA5043041NJPSYHQ")
+
 # Hugging Face Inference Providers — OpenAI-compatible chat completions router.
 # Swapping AI providers later (incl. Claude) = change these two env vars only.
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
@@ -427,6 +431,67 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "researchmind-api"}
+
+
+@app.get("/checkout", response_class=HTMLResponse)
+async def checkout():
+    """Hosted PayPal subscription button. Opened in a new tab by both the web
+    app and the Chrome extension (extensions can't load the PayPal SDK inline
+    under manifest CSP, so a hosted page is the reliable path). Renders the
+    official PayPal Buttons SDK — the raw subscriptions URL is not a supported
+    standalone checkout."""
+    if not PAYPAL_CLIENT_ID:
+        return HTMLResponse(
+            "<h2 style='font-family:sans-serif'>Checkout isn't configured yet.</h2>",
+            status_code=503,
+        )
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Upgrade to ResearchMind Pro</title>
+<style>
+  body{{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+    font-family:Inter,system-ui,sans-serif;color:#e5e1f2;
+    background:radial-gradient(60% 45% at 15% -10%,rgba(139,92,246,.3),transparent 60%),
+    radial-gradient(55% 40% at 95% 0%,rgba(59,130,246,.24),transparent 60%),#0a0714}}
+  .card{{max-width:420px;width:100%;margin:20px;padding:30px 26px;border-radius:24px;text-align:center;
+    border:1px solid rgba(255,255,255,.09);background:rgba(255,255,255,.04)}}
+  h1{{font-size:21px;margin:6px 0 2px}}
+  .grad{{background:linear-gradient(120deg,#c4b5fd,#60a5fa);-webkit-background-clip:text;
+    background-clip:text;color:transparent}}
+  .price{{font-size:26px;font-weight:800;margin:14px 0 2px}}
+  .sub{{font-size:12.5px;color:#94a3b8;margin-bottom:18px}}
+  #paypal-button-container{{min-height:50px}}
+  .note{{font-size:11px;color:#64748b;margin-top:16px;line-height:1.5}}
+  .ok{{display:none;padding:16px;border-radius:14px;background:rgba(52,211,153,.12);
+    border:1px solid rgba(52,211,153,.3);color:#a7f3d0;font-size:13px;line-height:1.6}}
+</style></head><body><div class="card">
+  <div style="font-size:30px">🚀</div>
+  <h1>ResearchMind <span class="grad">Pro</span></h1>
+  <div class="price">$1.40 <span style="font-size:14px;color:#94a3b8">/ 6 months</span></div>
+  <div class="sub">Unlimited summaries, citations & writer tools</div>
+  <div id="paypal-button-container"></div>
+  <div id="success" class="ok">
+    ✅ Subscription active! Your license key is on its way to your email —
+    check your inbox (and spam) in a minute, then paste it into the ResearchMind
+    Settings tab to unlock Pro.
+  </div>
+  <p class="note">Secure payment via PayPal · Cancel anytime · License key sent by email</p>
+</div>
+<script src="https://www.paypal.com/sdk/js?client-id={PAYPAL_CLIENT_ID}&vault=true&intent=subscription"></script>
+<script>
+  paypal.Buttons({{
+    style: {{ shape: 'pill', color: 'blue', layout: 'vertical', label: 'subscribe' }},
+    createSubscription: function(data, actions) {{
+      return actions.subscription.create({{ plan_id: '{PAYPAL_PLAN_ID}' }});
+    }},
+    onApprove: function(data) {{
+      document.getElementById('paypal-button-container').style.display = 'none';
+      document.getElementById('success').style.display = 'block';
+    }}
+  }}).render('#paypal-button-container');
+</script>
+</body></html>"""
 
 
 class ValidateKeyRequest(BaseModel):

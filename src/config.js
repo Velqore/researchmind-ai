@@ -9,11 +9,11 @@ export const API_BASE = 'https://airesearchmind.vercel.app';
 // the UI without a running backend.
 export const DEMO_MODE = false;
 
-// Real PayPal subscription checkout.
-// Create the $1.40 / 6-month plan in the PayPal dashboard (see backend/README.md)
-// and paste its plan id here.
+// Real PayPal subscription checkout. The backend serves a hosted checkout
+// page (/checkout) that renders PayPal's official Buttons SDK — the only
+// reliable way to run a subscription, and CSP-safe for the extension.
 export const PAYPAL_PLAN_ID = 'P-0HL98976NA5043041NJPSYHQ';
-export const UPGRADE_URL = `https://www.paypal.com/webapps/billing/subscriptions?plan_id=${PAYPAL_PLAN_ID}`;
+export const UPGRADE_URL = `${API_BASE}/checkout`;
 
 export const PRICE_LABEL = '$1.40 / 6 months';
 export const PRICE_SUBTEXT = 'One payment · ~23¢ a month';
