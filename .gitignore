@@ -1,5 +1,6 @@
 node_modules/
 dist/
+dist-web/
 *.zip
 .env
 .DS_Store
