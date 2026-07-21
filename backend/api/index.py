@@ -74,18 +74,26 @@ MODEL_ID = os.environ.get("MODEL_ID", "Qwen/Qwen2.5-72B-Instruct")
 HF_CHAT_URL = "https://router.huggingface.co/v1/chat/completions"
 
 # Hugging Face free-tier inference reliably handles ~45k chars; beyond that it
-# returns 502s. Cap well under that for fast, dependable summaries.
-MAX_INPUT_CHARS = 32_000
+# returns 502s. Free users get a smaller cap; Pro users get the full safe max.
+FREE_MAX_INPUT_CHARS = 20_000
+PRO_MAX_INPUT_CHARS = 45_000
+HARD_MAX_INPUT_CHARS = 45_000  # absolute ceiling llm_chat never exceeds
 CACHE_HOURS = 24
 
+# Admin key — set ADMIN_KEY in the backend env to a value of the form
+# RMND-XXXX-XXXX-XXXX. Entering it in Settings unlocks Pro + full limits for
+# testing, with no Supabase row and no PayPal needed. Keep it secret.
+ADMIN_KEY = os.environ.get("ADMIN_KEY", "").strip().upper()
 
-def clamp_for_llm(text: str) -> str:
+
+def clamp_for_llm(text: str, cap: int = HARD_MAX_INPUT_CHARS) -> str:
     """Keep large documents within the reliable input size. For long text,
     take the beginning AND end so a paper's intro and conclusion both survive."""
-    if len(text) <= MAX_INPUT_CHARS:
+    cap = min(cap, HARD_MAX_INPUT_CHARS)
+    if len(text) <= cap:
         return text
-    head = int(MAX_INPUT_CHARS * 0.72)
-    tail = MAX_INPUT_CHARS - head - 40
+    head = int(cap * 0.72)
+    tail = cap - head - 40
     return text[:head] + "\n\n[… middle omitted for length …]\n\n" + text[-tail:]
 
 # Server-side free-tier limits (per hashed IP per UTC day) — a backstop for
@@ -165,7 +173,7 @@ async def llm_chat(system: str, user: str, max_tokens: int = 1200) -> str:
         "model": MODEL_ID,
         "messages": [
             {"role": "system", "content": system},
-            {"role": "user", "content": user[:MAX_INPUT_CHARS]},
+            {"role": "user", "content": user[:HARD_MAX_INPUT_CHARS]},
         ],
         "max_tokens": max_tokens,
         "temperature": 0.4,
@@ -192,8 +200,11 @@ async def llm_chat(system: str, user: str, max_tokens: int = 1200) -> str:
 
 
 async def is_pro(request: Request) -> bool:
-    """True when the request carries a valid, unexpired license key."""
+    """True when the request carries a valid, unexpired license key (or the
+    admin key, which unlocks everything for testing)."""
     key = (request.headers.get("x-license-key") or "").strip().upper()
+    if ADMIN_KEY and key == ADMIN_KEY:
+        return True
     if len(key.replace("-", "")) != 16 or not SUPABASE_URL:
         return False
     try:
@@ -531,10 +542,16 @@ class ValidateKeyRequest(BaseModel):
 
 @app.post("/validate-key")
 async def validate_key(body: ValidateKeyRequest, request: Request):
-    require_env(("SUPABASE_URL", SUPABASE_URL), ("SUPABASE_SERVICE_ROLE_KEY", SUPABASE_KEY))
     key = body.key.strip().upper()
     if len(key.replace("-", "")) != 16:
         raise HTTPException(400, "This key is invalid or has expired.")
+
+    # Admin key: instant Pro for testing, no Supabase/PayPal required.
+    if ADMIN_KEY and key == ADMIN_KEY:
+        far_future = (datetime.now(timezone.utc) + timedelta(days=3650)).isoformat()
+        return {"valid": True, "expires_at": far_future}
+
+    require_env(("SUPABASE_URL", SUPABASE_URL), ("SUPABASE_SERVICE_ROLE_KEY", SUPABASE_KEY))
 
     async with httpx.AsyncClient(timeout=10) as client:
         rows = await sb_select(
@@ -723,7 +740,7 @@ async def fetch_page_text(url: str) -> tuple[str, str]:
     text = re.sub(r"[ \t\r\f]+", " ", text)
     text = re.sub(r"\n\s*\n+", "\n\n", text).strip()
     title = re.sub(r"\s+", " ", title_m.group(1)).strip() if title_m else url
-    return title, text[:MAX_INPUT_CHARS]
+    return title, text[:HARD_MAX_INPUT_CHARS]
 
 
 class SummarizeRequest(BaseModel):
@@ -744,7 +761,7 @@ async def summarize(body: SummarizeRequest, request: Request):
     if cached:
         return {"summary": cached, "cached": True, "title": title or body.url}
 
-    await enforce_tier(request, "summarize")
+    pro = await enforce_tier(request, "summarize")
 
     # Web app sends only a URL — fetch and extract the page server-side.
     if len(text) < 40 and body.url:
@@ -753,11 +770,12 @@ async def summarize(body: SummarizeRequest, request: Request):
     if len(text) < 40:
         raise HTTPException(400, "Not enough readable text on this page to summarize.")
 
+    cap = PRO_MAX_INPUT_CHARS if pro else FREE_MAX_INPUT_CHARS
     summary = await llm_chat(
         "You are ResearchMind, an expert research assistant. Summarize accurately — "
         "never invent facts, numbers, or citations not present in the text. "
         "Use **bold** for section headers and '• ' for bullets. " + SUMMARY_STYLES[length],
-        f"Title: {title}\n\nContent:\n{clamp_for_llm(text)}",
+        f"Title: {title}\n\nContent:\n{clamp_for_llm(text, cap)}",
         max_tokens=900,
     )
     await cache_put(body.url, length, summary)
