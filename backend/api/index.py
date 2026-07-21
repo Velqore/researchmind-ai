@@ -857,9 +857,11 @@ async def explain(body: ExplainRequest, request: Request):
 
 
 class CiteRequest(BaseModel):
-    url: str
+    url: str = ""
     title: str = ""
     style: str = "APA"
+    text: str = ""  # pasted / uploaded paper content
+    concept: str = ""  # a specific quote or concept to cite from the source
 
 
 @app.post("/cite")
@@ -867,14 +869,47 @@ async def cite(body: CiteRequest, request: Request):
     style = body.style if body.style in ("APA", "MLA", "Chicago") else "APA"
     await enforce_tier(request, "cite")
     today = datetime.now(timezone.utc).strftime("%B %d, %Y")
-    citation = await llm_chat(
-        f"You generate {style}-style citations for web sources. "
-        "Return ONLY the citation text — no preamble, no quotes, no explanation. "
-        "If author or publication date are unknown, follow the style's rules for "
-        "missing information rather than inventing them.",
-        f"Title: {body.title or 'Unknown'}\nURL: {body.url}\nAccessed: {today}",
-        max_tokens=200,
-    )
+
+    content = body.text.strip()
+    title = body.title.strip()
+    # When only a link is given, fetch & read the page so the citation is built
+    # from real metadata (author, date, publisher) instead of the URL alone.
+    if not content and body.url:
+        try:
+            fetched_title, content = await fetch_page_text(body.url)
+            title = title or fetched_title
+        except HTTPException:
+            content = ""
+
+    concept = body.concept.strip()
+    if content:
+        system = (
+            f"You are ResearchMind, an expert at {style} citations. From the SOURCE "
+            "CONTENT, identify the real author(s), publication year/date, title, and "
+            f"publisher or site, and build an accurate {style} reference. Use the URL "
+            f"and access date {today} for web sources. Never invent details that are "
+            "genuinely absent — follow the style's missing-information rules instead."
+        )
+        if concept:
+            system += (
+                "\n\nThe user wants to cite a specific idea/quote from this source. "
+                "Return markdown with exactly:\n**In-text citation** — the correct "
+                f"{style} in-text form for that idea (include a page/section if the "
+                "content shows one).\n**Reference** — the full reference-list entry.\n"
+                "Base the in-text citation only on where that idea actually appears."
+            )
+        else:
+            system += " Return ONLY the reference-list entry — no preamble or notes."
+        user = f"URL: {body.url or 'n/a'}\nConcept to cite: {concept or 'n/a'}\n\nSOURCE CONTENT:\n{clamp_for_llm(content, 24000)}"
+        citation = await llm_chat(system, user, max_tokens=350)
+    else:
+        citation = await llm_chat(
+            f"You generate {style}-style citations for web sources. Return ONLY the "
+            "citation text — no preamble. If author or date are unknown, follow the "
+            "style's missing-information rules rather than inventing them.",
+            f"Title: {title or 'Unknown'}\nURL: {body.url}\nAccessed: {today}",
+            max_tokens=200,
+        )
     return {"citation": citation, "style": style}
 
 

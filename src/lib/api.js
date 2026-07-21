@@ -109,7 +109,7 @@ export async function proTool({ tool, text, papers, option, licenseKey }) {
   return post('/pro-tool', { tool, text, papers, option }, licenseKey);
 }
 
-export async function generateCitation({ url, title, style, licenseKey }) {
+export async function generateCitation({ url, title, style, text, concept, licenseKey }) {
   if (DEMO_MODE) {
     await delay(900);
     const year = new Date().getFullYear();
@@ -120,5 +120,5 @@ export async function generateCitation({ url, title, style, licenseKey }) {
     };
     return { citation: demo[style] ?? demo.APA, style };
   }
-  return post('/cite', { url, title, style }, licenseKey);
+  return post('/cite', { url, title, style, text, concept }, licenseKey);
 }

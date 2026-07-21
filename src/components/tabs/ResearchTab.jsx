@@ -6,6 +6,7 @@ import ErrorCard from '../ErrorCard';
 import LimitBanner from '../LimitBanner';
 import RichText from '../RichText';
 import { SkeletonLines } from '../Skeleton';
+import UploadButton from '../UploadButton';
 import UsageBar from '../UsageBar';
 
 const CITE_STYLES = ['APA', 'MLA', 'Chicago'];
@@ -43,6 +44,9 @@ export default function ResearchTab() {
   // --- Citation generator ---
   const [style, setStyle] = useState('APA');
   const [citeUrl, setCiteUrl] = useState(''); // web mode: user provides the link
+  const [citeText, setCiteText] = useState(''); // uploaded/pasted paper content
+  const [citeFileName, setCiteFileName] = useState('');
+  const [citeConcept, setCiteConcept] = useState(''); // specific quote/concept to cite
   const [citeState, setCiteState] = useState('idle');
   const [citation, setCitation] = useState(null);
   const [citeCopied, setCiteCopied] = useState(false);
@@ -82,8 +86,9 @@ export default function ResearchTab() {
       setCiteState('offline');
       return;
     }
-    let page;
-    if (isWeb) {
+    let page = { url: '', title: '' };
+    const haveFile = citeText.trim().length > 20;
+    if (isWeb && !haveFile) {
       const url = citeUrl.trim();
       if (!/^https?:\/\/\S+\.\S+/.test(url)) return;
       page = { url, title: '' };
@@ -91,11 +96,13 @@ export default function ResearchTab() {
     setCiteState('loading');
     setCitation(null);
     try {
-      if (!isWeb) page = await getCurrentPage();
+      if (!isWeb && !haveFile) page = await getCurrentPage();
       const res = await generateCitation({
         url: page.url,
-        title: page.title,
+        title: page.title || citeFileName,
         style,
+        text: citeText,
+        concept: citeConcept,
         licenseKey: license.key,
       });
       const allowed = await useFeature('cite');
@@ -239,17 +246,48 @@ export default function ResearchTab() {
           <LimitBanner message="You've used all your free citations today. Unlock unlimited access for just $1.40 for 6 months 🚀" />
         ) : (
           <>
-            {isWeb && (
+            {isWeb && !citeText && (
               <input
                 value={citeUrl}
                 onChange={(e) => setCiteUrl(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleCite()}
-                placeholder="Paste the link to cite…"
+                placeholder="Paste a link — the page is read for an accurate citation…"
                 spellCheck={false}
-                className="input-dark mb-2.5"
+                className="input-dark mb-2"
                 aria-label="Link to cite"
               />
             )}
+
+            {/* upload a paper to cite it accurately */}
+            {citeText ? (
+              <div className="animate-scale-in mb-2 flex items-center gap-2 rounded-xl border border-brand-violet/25 bg-brand-violet/[0.08] p-2.5">
+                <span className="text-base">📄</span>
+                <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium text-slate-200">
+                  {citeFileName || 'Uploaded paper'}
+                </span>
+                <button
+                  onClick={() => {
+                    setCiteText('');
+                    setCiteFileName('');
+                  }}
+                  aria-label="Remove file"
+                  className="shrink-0 px-1 text-[13px] text-slate-500 hover:text-rose-400"
+                >
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <div className="mb-2.5">
+                <UploadButton
+                  label="Upload paper to cite"
+                  onText={(text, title) => {
+                    setCiteText(text);
+                    setCiteFileName(title || 'Uploaded paper');
+                  }}
+                />
+              </div>
+            )}
+
             <div className="mb-2.5 flex gap-1.5" role="radiogroup" aria-label="Citation style">
               {CITE_STYLES.map((s) => (
                 <button
@@ -263,12 +301,24 @@ export default function ResearchTab() {
                 </button>
               ))}
             </div>
+
+            {/* cite a specific quote/concept from the source */}
+            <input
+              value={citeConcept}
+              onChange={(e) => setCiteConcept(e.target.value)}
+              placeholder="Optional: a specific quote or concept to cite…"
+              className="input-dark mb-2.5"
+              aria-label="Specific concept to cite"
+            />
+
             <button
               onClick={handleCite}
-              disabled={citeState === 'loading' || (isWeb && !citeUrl.trim())}
+              disabled={
+                citeState === 'loading' || (isWeb && !citeText && !citeUrl.trim())
+              }
               className="btn-primary"
             >
-              {citeState === 'loading' ? 'Generating…' : `Generate ${style} citation`}
+              {citeState === 'loading' ? 'Analyzing source…' : `Generate ${style} citation`}
             </button>
             <div className="mt-3">
               <UsageBar feature="cite" />
@@ -288,9 +338,13 @@ export default function ResearchTab() {
         )}
         {citeState === 'done' && citation && (
           <div className="animate-slide-up mt-3 rounded-xl border border-brand-blue/20 bg-brand-blue/[0.07] p-3">
-            <p className="break-words font-mono text-[11.5px] leading-relaxed text-slate-200">
-              {citation}
-            </p>
+            {citation.includes('**') ? (
+              <RichText text={citation} />
+            ) : (
+              <p className="break-words font-mono text-[11.5px] leading-relaxed text-slate-200">
+                {citation}
+              </p>
+            )}
             <button onClick={copyCitation} className="chip mt-2.5">
               {citeCopied ? '✓ Copied' : 'Copy citation'}
             </button>
@@ -340,11 +394,27 @@ export default function ResearchTab() {
                     />
                   ))}
                 </div>
-                {papers.length < 4 && (
-                  <button onClick={() => setPapers([...papers, ''])} className="chip mt-2">
-                    ＋ Add another
-                  </button>
-                )}
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {papers.length < 4 && (
+                    <button onClick={() => setPapers([...papers, ''])} className="chip">
+                      ＋ Add another
+                    </button>
+                  )}
+                  <UploadButton
+                    label="Upload paper"
+                    onText={(text) => {
+                      setPapers((prev) => {
+                        const idx = prev.findIndex((p) => !p.trim());
+                        if (idx >= 0) {
+                          const next = [...prev];
+                          next[idx] = text;
+                          return next;
+                        }
+                        return prev.length < 4 ? [...prev, text] : prev;
+                      });
+                    }}
+                  />
+                </div>
               </>
             )}
 
@@ -360,14 +430,19 @@ export default function ResearchTab() {
             )}
 
             {(tool.mode === 'text' || tool.mode === 'ask' || tool.mode === 'translate') && (
-              <textarea
-                value={toolText}
-                onChange={(e) => setToolText(e.target.value)}
-                placeholder={tool.ph}
-                rows={5}
-                className="input-dark resize-none"
-                aria-label={tool.name}
-              />
+              <>
+                <textarea
+                  value={toolText}
+                  onChange={(e) => setToolText(e.target.value)}
+                  placeholder={tool.ph}
+                  rows={5}
+                  className="input-dark resize-none"
+                  aria-label={tool.name}
+                />
+                <div className="mt-2">
+                  <UploadButton label="Upload file instead" onText={(text) => setToolText(text)} />
+                </div>
+              </>
             )}
 
             {tool.mode === 'ask' && (
