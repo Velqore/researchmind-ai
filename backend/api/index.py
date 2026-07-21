@@ -484,6 +484,26 @@ async def health():
     return {"status": "ok", "service": "researchmind-api"}
 
 
+@app.get("/test-email")
+async def test_email(key: str = "", to: str = ""):
+    """Admin-only SMTP check: /test-email?key=<ADMIN_KEY>&to=you@example.com
+    Sends a real license email so you can confirm SMTP works before going live."""
+    if not ADMIN_KEY or key.strip().upper() != ADMIN_KEY:
+        raise HTTPException(403, "Admin key required.")
+    recipient = to.strip() or os.environ.get("FROM_EMAIL", "") or os.environ.get("SMTP_USER", "")
+    if not recipient:
+        raise HTTPException(400, "Pass ?to=an-email-address.")
+    try:
+        send_license_email(
+            recipient, "RMND-TEST-EMAIL-OK", datetime.now(timezone.utc) + timedelta(days=180)
+        )
+        return {"sent": True, "to": recipient}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"SMTP failed: {type(e).__name__}: {str(e)[:200]}")
+
+
 @app.get("/diag")
 async def diag(key: str = ""):
     """Admin-only provider health check: ?key=<ADMIN_KEY>. Reports which AI
