@@ -1,13 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../../AppContext';
-import {
-  comparePapers,
-  explainTerm,
-  findResearchGaps,
-  generateCitation,
-  getCurrentPage,
-  getSelection,
-} from '../../lib/api';
+import { explainTerm, generateCitation, getCurrentPage, getSelection, proTool } from '../../lib/api';
 import { isWeb } from '../../lib/storage';
 import ErrorCard from '../ErrorCard';
 import LimitBanner from '../LimitBanner';
@@ -17,20 +10,26 @@ import UsageBar from '../UsageBar';
 
 const CITE_STYLES = ['APA', 'MLA', 'Chicago'];
 
-// Live Pro tools have a working backend and open the multi-paper panel.
+// Every Pro tool is live and backed by real AI, grounded in the user's own
+// pasted text (no fabricated citations). `mode` drives the input UI:
+//   papers  — one or more paper textareas
+//   text    — a single textarea
+//   topic   — a short single-line topic input
+//   ask     — a paper textarea + a question field
+//   translate — a text textarea + a language field
 const PRO_TOOLS = [
-  { id: 'compare', icon: '📊', name: 'Compare papers', desc: 'Side-by-side multi-paper analysis', live: true },
-  { id: 'gaps', icon: '🧭', name: 'Research gaps', desc: 'Find unexplored angles in a field', live: true },
-  { icon: '📖', name: 'Auto bibliography', desc: 'Build a full reference list' },
-  { icon: '🎥', name: 'YouTube lectures', desc: 'Summarize any lecture video' },
-  { icon: '💬', name: 'Chat with PDF', desc: 'Ask questions to any paper' },
-  { icon: '📰', name: 'Daily digest', desc: 'Google Scholar updates on your topic' },
-  { icon: '🃏', name: 'Flashcards', desc: 'Auto-generate study cards from papers' },
-  { icon: '🕸️', name: 'Mind maps', desc: 'Visualize a topic or paper as a map' },
-  { icon: '📝', name: 'Lit review draft', desc: 'First-draft literature reviews' },
-  { icon: '🔗', name: 'Related papers', desc: 'Discover connected research' },
-  { icon: '📋', name: 'Extract tables', desc: 'Pull tables & figures from PDFs' },
-  { icon: '🌐', name: 'Translate', desc: 'Read papers in 50+ languages' },
+  { id: 'compare', icon: '📊', name: 'Compare papers', desc: 'Side-by-side multi-paper analysis', mode: 'papers', min: 2, cta: 'Compare papers', run: 'Comparing…' },
+  { id: 'research_gap', icon: '🧭', name: 'Research gaps', desc: 'Find unexplored angles in a paper', mode: 'papers', min: 1, cta: 'Find research gaps', run: 'Analyzing…' },
+  { id: 'bibliography', icon: '📖', name: 'Auto bibliography', desc: 'Format sources into a reference list', mode: 'papers', min: 1, cta: 'Build bibliography', run: 'Building…' },
+  { id: 'litreview', icon: '📝', name: 'Lit review draft', desc: 'First-draft literature review', mode: 'papers', min: 1, cta: 'Draft review', run: 'Drafting…' },
+  { id: 'flashcards', icon: '🃏', name: 'Flashcards', desc: 'Study cards from any text', mode: 'text', ph: 'Paste text to turn into flashcards…', cta: 'Make flashcards', run: 'Generating…' },
+  { id: 'mindmap', icon: '🕸️', name: 'Mind map', desc: 'Outline a topic or paper as a map', mode: 'text', ph: 'Paste a topic or text…', cta: 'Build mind map', run: 'Mapping…' },
+  { id: 'tables', icon: '📋', name: 'Extract tables', desc: 'Pull tabular data from text', mode: 'text', ph: 'Paste text containing tables/data…', cta: 'Extract tables', run: 'Extracting…' },
+  { id: 'related', icon: '🔗', name: 'Related work', desc: 'Directions & search queries', mode: 'text', ph: 'Paste an abstract or topic…', cta: 'Find directions', run: 'Searching…' },
+  { id: 'youtube', icon: '🎥', name: 'Lecture notes', desc: 'Notes from a video transcript', mode: 'text', ph: 'Paste the lecture/video transcript…', cta: 'Summarize lecture', run: 'Summarizing…' },
+  { id: 'askpaper', icon: '💬', name: 'Ask a paper', desc: 'Ask questions about a paper', mode: 'ask', ph: 'Paste the paper text…', cta: 'Ask', run: 'Reading…' },
+  { id: 'translate', icon: '🌐', name: 'Translate', desc: 'Any text, 50+ languages', mode: 'translate', ph: 'Paste text to translate…', cta: 'Translate', run: 'Translating…' },
+  { id: 'digest', icon: '📚', name: 'Topic briefing', desc: 'Study guide for any topic', mode: 'topic', ph: 'e.g. diffusion models', cta: 'Build briefing', run: 'Preparing…' },
 ];
 
 export default function ResearchTab() {
@@ -117,38 +116,41 @@ export default function ResearchTab() {
     setTimeout(() => setCiteCopied(false), 1500);
   };
 
-  // --- Pro multi-paper tools (Compare / Research gaps) ---
-  const [tool, setTool] = useState(null); // 'compare' | 'gaps' | null
+  // --- Pro tools (config-driven; all live) ---
+  const [tool, setTool] = useState(null); // the active PRO_TOOLS entry, or null
   const [papers, setPapers] = useState(['', '']);
+  const [toolText, setToolText] = useState('');
+  const [toolOption, setToolOption] = useState(''); // language or question
   const [toolState, setToolState] = useState('idle'); // idle | loading | done | error
   const [toolResult, setToolResult] = useState('');
-  const [soon, setSoon] = useState('');
 
   const openTool = (t) => {
     if (!isPro) return openUpgrade();
-    if (!t.live) {
-      setSoon(t.name);
-      setTimeout(() => setSoon(''), 2200);
-      return;
-    }
-    setTool(t.id);
-    setPapers(t.id === 'gaps' ? [''] : ['', '']);
+    setTool(t);
+    setPapers(t.mode === 'papers' ? (t.min >= 2 ? ['', ''] : ['']) : ['']);
+    setToolText('');
+    setToolOption(t.mode === 'translate' ? 'Hindi' : '');
     setToolState('idle');
     setToolResult('');
   };
 
   const runTool = async () => {
-    const filled = papers.map((p) => p.trim()).filter(Boolean);
-    const min = tool === 'gaps' ? 1 : 2;
-    if (filled.length < min) return;
+    if (!tool) return;
+    let payload = { tool: tool.id, licenseKey: license.key };
+    if (tool.mode === 'papers') {
+      const filled = papers.map((p) => p.trim()).filter(Boolean);
+      if (filled.length < (tool.min || 1)) return;
+      payload.papers = filled;
+    } else {
+      if (!toolText.trim()) return;
+      payload.text = toolText;
+      if (tool.mode === 'translate' || tool.mode === 'ask') payload.option = toolOption;
+    }
     setToolState('loading');
     setToolResult('');
     try {
-      const res =
-        tool === 'gaps'
-          ? await findResearchGaps({ papers: filled, licenseKey: license.key })
-          : await comparePapers({ papers: filled, licenseKey: license.key });
-      setToolResult(tool === 'gaps' ? res.gaps : res.comparison);
+      const res = await proTool(payload);
+      setToolResult(res.result);
       setToolState('done');
     } catch (err) {
       setToolResult(err.message || 'Something went wrong. Please try again.');
@@ -306,64 +308,99 @@ export default function ResearchTab() {
         </h2>
 
         {tool ? (
-          /* ---- Live tool panel (Compare / Research gaps) ---- */
+          /* ---- Live tool panel ---- */
           <div className="animate-fade-in">
             <div className="mb-2.5 flex items-center justify-between">
               <h3 className="text-[13.5px] font-bold text-white">
-                {tool === 'gaps' ? '🧭 Research gaps' : '📊 Compare papers'}
+                {tool.icon} {tool.name}
               </h3>
-              <button
-                onClick={() => setTool(null)}
-                className="chip"
-                aria-label="Back to tools"
-              >
+              <button onClick={() => setTool(null)} className="chip" aria-label="Back to tools">
                 ← Back
               </button>
             </div>
-            <p className="mb-2.5 text-[11.5px] text-slate-400">
-              {tool === 'gaps'
-                ? 'Paste one or more papers (abstract or full text) to surface open questions.'
-                : 'Paste two or more papers to compare their methods and findings.'}
-            </p>
+            <p className="mb-2.5 text-[11.5px] text-slate-400">{tool.desc}</p>
 
-            <div className="space-y-2">
-              {papers.map((p, idx) => (
-                <textarea
-                  key={idx}
-                  value={p}
-                  onChange={(e) => {
-                    const next = [...papers];
-                    next[idx] = e.target.value;
-                    setPapers(next);
-                  }}
-                  placeholder={`Paper ${idx + 1} — paste abstract or text…`}
-                  rows={3}
-                  className="input-dark resize-none"
-                  aria-label={`Paper ${idx + 1}`}
-                />
-              ))}
-            </div>
-
-            {papers.length < 4 && (
-              <button onClick={() => setPapers([...papers, ''])} className="chip mt-2">
-                ＋ Add another paper
-              </button>
+            {/* --- inputs by mode --- */}
+            {tool.mode === 'papers' && (
+              <>
+                <div className="space-y-2">
+                  {papers.map((p, idx) => (
+                    <textarea
+                      key={idx}
+                      value={p}
+                      onChange={(e) => {
+                        const next = [...papers];
+                        next[idx] = e.target.value;
+                        setPapers(next);
+                      }}
+                      placeholder={`Source ${idx + 1} — paste abstract or text…`}
+                      rows={3}
+                      className="input-dark resize-none"
+                      aria-label={`Source ${idx + 1}`}
+                    />
+                  ))}
+                </div>
+                {papers.length < 4 && (
+                  <button onClick={() => setPapers([...papers, ''])} className="chip mt-2">
+                    ＋ Add another
+                  </button>
+                )}
+              </>
             )}
 
-            <button
-              onClick={runTool}
-              disabled={toolState === 'loading'}
-              className="btn-primary mt-2.5"
-            >
+            {tool.mode === 'topic' && (
+              <input
+                value={toolText}
+                onChange={(e) => setToolText(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && runTool()}
+                placeholder={tool.ph}
+                className="input-dark"
+                aria-label={tool.name}
+              />
+            )}
+
+            {(tool.mode === 'text' || tool.mode === 'ask' || tool.mode === 'translate') && (
+              <textarea
+                value={toolText}
+                onChange={(e) => setToolText(e.target.value)}
+                placeholder={tool.ph}
+                rows={5}
+                className="input-dark resize-none"
+                aria-label={tool.name}
+              />
+            )}
+
+            {tool.mode === 'ask' && (
+              <input
+                value={toolOption}
+                onChange={(e) => setToolOption(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && runTool()}
+                placeholder="Your question about the paper…"
+                className="input-dark mt-2"
+                aria-label="Question"
+              />
+            )}
+
+            {tool.mode === 'translate' && (
+              <input
+                value={toolOption}
+                onChange={(e) => setToolOption(e.target.value)}
+                placeholder="Target language, e.g. Hindi, Spanish, French"
+                className="input-dark mt-2"
+                aria-label="Target language"
+              />
+            )}
+
+            <button onClick={runTool} disabled={toolState === 'loading'} className="btn-primary mt-2.5">
               {toolState === 'loading' ? (
                 <>
                   <span className="h-4 w-4 animate-spin rounded-full border-2 border-black/30 border-t-black/80" />
-                  Analyzing…
+                  {tool.run}
                 </>
-              ) : tool === 'gaps' ? (
-                '🧭 Find research gaps'
               ) : (
-                '📊 Compare papers'
+                <>
+                  {tool.icon} {tool.cta}
+                </>
               )}
             </button>
 
@@ -378,43 +415,31 @@ export default function ResearchTab() {
               </p>
             )}
             {toolState === 'done' && toolResult && (
-              <div className="animate-slide-up mt-3 rounded-xl border border-brand-violet/20 bg-brand-violet/[0.07] p-3">
+              <div className="animate-slide-up mt-3 max-h-[280px] overflow-y-auto rounded-xl border border-brand-violet/20 bg-brand-violet/[0.07] p-3">
                 <RichText text={toolResult} />
               </div>
             )}
           </div>
         ) : (
-          <>
-            <div className="grid grid-cols-2 gap-2">
-              {PRO_TOOLS.map((t) => (
-                <button
-                  key={t.name}
-                  onClick={() => openTool(t)}
-                  className="glass-hover group relative rounded-xl border border-white/[0.06] bg-white/[0.03] p-3 text-left"
-                  title={t.live ? t.name : isPro ? 'Coming soon' : 'Upgrade to unlock'}
-                >
-                  {!isPro && (
-                    <span className="absolute right-2 top-2 text-[11px] opacity-60 transition-opacity group-hover:opacity-100">
-                      🔒
-                    </span>
-                  )}
-                  {t.live && (
-                    <span className="absolute right-2 top-2 rounded bg-emerald-400/15 px-1 py-0.5 text-[8px] font-bold uppercase tracking-wide text-emerald-300">
-                      Live
-                    </span>
-                  )}
-                  <div className="text-lg">{t.icon}</div>
-                  <div className="mt-1 text-[12px] font-semibold text-slate-200">{t.name}</div>
-                  <div className="mt-0.5 text-[10.5px] leading-snug text-slate-500">{t.desc}</div>
-                </button>
-              ))}
-            </div>
-            {soon && (
-              <p className="animate-fade-in mt-3 text-center text-[11.5px] font-medium text-brand-cyan">
-                “{soon}” is coming soon — Compare papers &amp; Research gaps are live now ✨
-              </p>
-            )}
-          </>
+          <div className="grid grid-cols-2 gap-2">
+            {PRO_TOOLS.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => openTool(t)}
+                className="glass-hover group relative rounded-xl border border-white/[0.06] bg-white/[0.03] p-3 text-left"
+                title={isPro ? t.name : 'Upgrade to unlock'}
+              >
+                {!isPro && (
+                  <span className="absolute right-2 top-2 text-[11px] opacity-60 transition-opacity group-hover:opacity-100">
+                    🔒
+                  </span>
+                )}
+                <div className="text-lg">{t.icon}</div>
+                <div className="mt-1 text-[12px] font-semibold text-slate-200">{t.name}</div>
+                <div className="mt-0.5 text-[10.5px] leading-snug text-slate-500">{t.desc}</div>
+              </button>
+            ))}
+          </div>
         )}
       </div>
     </div>
