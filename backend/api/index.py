@@ -182,7 +182,7 @@ def client_ip(request: Request) -> str:
 # ------------------------------------------------------------------------- ai
 
 
-async def _try_provider(client, url, key, model, system, user, max_tokens):
+async def _try_provider(client, url, key, model, system, user, max_tokens, temperature):
     payload = {
         "model": model,
         "messages": [
@@ -190,14 +190,14 @@ async def _try_provider(client, url, key, model, system, user, max_tokens):
             {"role": "user", "content": user[:HARD_MAX_INPUT_CHARS]},
         ],
         "max_tokens": max_tokens,
-        "temperature": 0.4,
+        "temperature": temperature,
     }
     r = await client.post(url, headers={"Authorization": f"Bearer {key}"}, json=payload)
     r.raise_for_status()
     return r.json()["choices"][0]["message"]["content"].strip()
 
 
-async def llm_chat(system: str, user: str, max_tokens: int = 1200) -> str:
+async def llm_chat(system: str, user: str, max_tokens: int = 1200, temperature: float = 0.4) -> str:
     """Chat completion with multi-provider fallback. Tries each configured
     provider (Groq → HF) twice before giving up, so a single provider being
     rate-limited, out of credits, or down never takes the feature offline."""
@@ -209,7 +209,9 @@ async def llm_chat(system: str, user: str, max_tokens: int = 1200) -> str:
         for label, url, key, model in provs:
             for attempt in range(2):
                 try:
-                    return await _try_provider(client, url, key, model, system, user, max_tokens)
+                    return await _try_provider(
+                        client, url, key, model, system, user, max_tokens, temperature
+                    )
                 except httpx.HTTPStatusError as e:
                     last = f"{label} HTTP {e.response.status_code}"
                     # 4xx (bad key, quota) won't fix on retry — move to next provider
@@ -492,7 +494,7 @@ async def diag(key: str = ""):
     async with httpx.AsyncClient(timeout=30) as client:
         for label, url, k, model in ai_providers():
             try:
-                out = await _try_provider(client, url, k, model, "You are a test.", "Say OK.", 5)
+                out = await _try_provider(client, url, k, model, "You are a test.", "Say OK.", 5, 0.0)
                 results.append({"provider": label, "model": model, "ok": True, "sample": out[:30]})
             except httpx.HTTPStatusError as e:
                 results.append({"provider": label, "model": model, "ok": False,
@@ -917,24 +919,47 @@ class TextRequest(BaseModel):
     text: str
 
 
+# (system prompt, temperature). AI detectors key on low "burstiness" (uniform
+# sentence length) and low "perplexity" (predictable word choice), so the
+# humanizer deliberately raises both. Grammar polish runs near-deterministic
+# so it fixes errors instead of introducing them.
 WRITER_TOOLS = {
     "humanize": (
-        "Rewrite the text so it reads as natural, warm human writing: vary sentence "
-        "length, use contractions where natural, remove robotic transitions and "
-        "AI clichés. Preserve the meaning, facts, and approximate length. "
-        "Return ONLY the rewritten text."
+        "You rewrite AI-generated text so it reads as if a real person wrote it. "
+        "Keep the meaning, facts, and roughly the same length, but transform the "
+        "STYLE using how humans actually write:\n"
+        "• Burstiness — vary sentence length hard. Mix very short sentences (even "
+        "three words) with longer, winding ones. Never let sentences settle into a "
+        "uniform rhythm.\n"
+        "• Natural word choice — prefer specific, concrete, occasionally unexpected "
+        "words over generic ones. Use contractions (it's, don't, they're).\n"
+        "• Vary sentence openings — do not start consecutive sentences the same way. "
+        "Occasionally open with 'And', 'But', or 'So'.\n"
+        "• Kill AI tells — remove 'Moreover', 'Furthermore', 'Additionally', "
+        "'In conclusion', 'It is important to note', 'plays a crucial role', "
+        "'delve', 'tapestry', 'realm', and balanced 'not only… but also' scaffolding.\n"
+        "• Add light human texture — a rhetorical question, an aside, a plain-spoken "
+        "phrase — without adding new facts.\n"
+        "Grammar must stay correct. Return ONLY the rewritten text, nothing else."
     ),
     "paraphrase": (
-        "Paraphrase the text completely: new sentence structures and vocabulary "
-        "while preserving the exact meaning and all facts. The result must not "
-        "reuse distinctive phrases from the original. Return ONLY the rewritten text."
+        "Rewrite the text completely in fresh words and sentence structures while "
+        "preserving the exact meaning and every fact. Do not reuse distinctive "
+        "phrases from the original — change the wording enough that it would not be "
+        "flagged as copied, yet reads naturally with varied sentence length. Keep "
+        "grammar correct. Return ONLY the rewritten text."
     ),
     "polish": (
-        "Fix grammar, spelling, and punctuation, and sharpen clarity — but keep the "
-        "author's voice, tone, and structure. Change as little as possible. "
-        "Return ONLY the corrected text."
+        "You are a meticulous copy editor. Correct EVERY error in the text: grammar, "
+        "spelling, punctuation, capitalization, subject–verb agreement, verb tense, "
+        "articles (a/an/the), prepositions, plurals, and run-on or fragmented "
+        "sentences. Read the whole text carefully and fix all mistakes. Preserve the "
+        "author's meaning, voice, and content — do not add, remove, or restructure "
+        "ideas. Return ONLY the fully corrected text, nothing else."
     ),
 }
+
+WRITER_TEMP = {"humanize": 1.0, "paraphrase": 0.8, "polish": 0.15}
 
 
 def writer_endpoint(mode: str):
@@ -943,7 +968,9 @@ def writer_endpoint(mode: str):
         if len(text) < 20:
             raise HTTPException(400, "Please provide at least a sentence of text.")
         await enforce_tier(request, mode, pro_only=True)
-        result = await llm_chat(WRITER_TOOLS[mode], text, max_tokens=1500)
+        result = await llm_chat(
+            WRITER_TOOLS[mode], text, max_tokens=2000, temperature=WRITER_TEMP[mode]
+        )
         return {"result": result}
 
     return handler
