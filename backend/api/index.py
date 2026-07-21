@@ -962,3 +962,117 @@ async def research_gap(body: PapersRequest, request: Request):
         max_tokens=1000,
     )
     return {"gaps": result}
+
+
+# ---- Unified Pro tool endpoint (every remaining research/writing tool) -----
+
+# Each tool: (system prompt, max_tokens). All ground output in the user's own
+# pasted text so nothing is fabricated. {opt} is filled from the `option` field.
+PRO_TOOLS = {
+    "bibliography": (
+        "You are ResearchMind. Turn the provided sources (titles, URLs, author/date "
+        "notes) into a clean, alphabetically ordered reference list in the style the "
+        "user names (default APA). Use ONLY details present in the input — if a field "
+        "is missing, follow the style's missing-info rules; never invent authors, "
+        "years, or journals. Output each reference on its own line.",
+        1200,
+    ),
+    "flashcards": (
+        "You are ResearchMind, a study-tools expert. From the provided text, create "
+        "8-15 study flashcards drawn strictly from its content. Format each as two "
+        "lines:\n**Q:** <question>\n**A:** <concise answer>\nSeparate cards with a "
+        "blank line. Cover the key concepts, definitions, and findings.",
+        1600,
+    ),
+    "mindmap": (
+        "You are ResearchMind. Build a hierarchical mind-map outline of the provided "
+        "topic or text as nested markdown bullets — a central theme, main branches "
+        "(**bold**), and sub-points ('• '). Two to three levels deep. Base every "
+        "branch on the input; keep it structural and scannable.",
+        1200,
+    ),
+    "litreview": (
+        "You are ResearchMind, an academic writing assistant. Draft a first-draft "
+        "literature-review section synthesising the provided papers as markdown: "
+        "**Introduction** (what the body of work addresses), **Themes** (bullets "
+        "grouping shared findings), **Contrasts & debates** (bullets), **Summary & "
+        "gaps** (short paragraph). Synthesise only what the papers state; do not add "
+        "outside citations.",
+        1800,
+    ),
+    "related": (
+        "You are ResearchMind, a research strategist. From the provided abstract or "
+        "topic, suggest how to discover connected work as markdown: **Directions to "
+        "explore** (bullets — adjacent subfields, methods, applications), **Search "
+        "queries** (5-8 concrete query strings a user could paste into Google Scholar "
+        "or arXiv), **Key terms & keywords** (bullets). Do NOT fabricate specific "
+        "paper titles, authors, or citations — give directions and search strategies.",
+        1000,
+    ),
+    "tables": (
+        "You are ResearchMind. Extract any tabular or structured data present in the "
+        "provided text and render it as clean markdown tables, one per distinct table, "
+        "each with a short **bold** caption. If the text contains no tabular data, say "
+        "so plainly. Use ONLY values present in the text; never invent numbers.",
+        1600,
+    ),
+    "translate": (
+        "You are ResearchMind, an expert academic translator. Translate the provided "
+        "text into {opt}, preserving meaning, technical terminology, and tone. Return "
+        "ONLY the translation, no preamble or notes.",
+        2000,
+    ),
+    "youtube": (
+        "You are ResearchMind. The user pasted a lecture/video transcript. Summarise it "
+        "into structured study notes as markdown: **Overview** (2-3 sentences), **Key "
+        "points** (bullets), **Important terms** (bullets: term — meaning), **Takeaways** "
+        "(2-3 bullets). Base everything on the transcript; do not invent content.",
+        1400,
+    ),
+    "askpaper": (
+        "You are ResearchMind. Answer the user's question using ONLY the provided "
+        "document text. Be accurate and cite the relevant part in your own words. If "
+        "the answer is not in the text, say so clearly rather than guessing. "
+        "Question: {opt}",
+        1000,
+    ),
+    "digest": (
+        "You are ResearchMind, a study guide. For the topic the user names, produce a "
+        "learning briefing as markdown: **What it is** (2-3 sentences), **Core "
+        "subtopics** (bullets), **Key methods & approaches** (bullets), **Open debates "
+        "& directions** (bullets), **How to go deeper** (2-3 search strategies). Give "
+        "durable, foundational knowledge; do NOT claim specific recent papers, dates, "
+        "or citations you cannot verify.",
+        1400,
+    ),
+}
+
+
+class ProToolRequest(BaseModel):
+    tool: str
+    text: str = ""
+    papers: list[str] = []
+    option: str = ""
+
+
+@app.post("/pro-tool")
+async def pro_tool(body: ProToolRequest, request: Request):
+    spec = PRO_TOOLS.get(body.tool)
+    if not spec:
+        raise HTTPException(400, "Unknown tool.")
+    system, max_tokens = spec
+
+    # Accept either a single text blob or multiple papers (joined).
+    if body.papers:
+        parts = [p.strip()[:20_000] for p in body.papers if p.strip()][:4]
+        text = "\n\n---\n\n".join(f"SOURCE {i + 1}:\n{p}" for i, p in enumerate(parts))
+    else:
+        text = body.text.strip()
+    if len(text) < 15:
+        raise HTTPException(400, "Please paste some text to work with.")
+
+    pro = await enforce_tier(request, f"pro_{body.tool}", pro_only=True)
+    system = system.replace("{opt}", body.option.strip() or "the requested target")
+    cap = PRO_MAX_INPUT_CHARS if pro else FREE_MAX_INPUT_CHARS
+    result = await llm_chat(system, clamp_for_llm(text, cap), max_tokens=max_tokens)
+    return {"result": result}
