@@ -2,7 +2,7 @@
 
 // FastAPI backend on Vercel. For local backend development, switch to
 // 'http://127.0.0.1:8000'.
-export const API_BASE = 'https://researchmind-ai-kappa.vercel.app';
+export const API_BASE = 'https://airesearchmind.vercel.app';
 
 // Demo mode returns mock AI responses instead of calling the backend.
 // The AI endpoints are live now, so it's off; flip to true only to demo
