@@ -494,9 +494,10 @@ async def test_email(key: str = "", to: str = ""):
     if not recipient:
         raise HTTPException(400, "Pass ?to=an-email-address.")
     try:
-        # Send the real admin key so the email doubles as your activation key.
+        # Use the real 6-month validity (LICENSE_DAYS) so the test email shows
+        # the same expiry a paying customer sees.
         send_license_email(
-            recipient, ADMIN_KEY, datetime.now(timezone.utc) + timedelta(days=3650)
+            recipient, ADMIN_KEY, datetime.now(timezone.utc) + timedelta(days=LICENSE_DAYS)
         )
         return {"sent": True, "to": recipient}
     except HTTPException:
