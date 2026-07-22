@@ -82,7 +82,7 @@ export default function LibraryTab() {
         </div>
 
         {limitHit ? (
-          <LimitBanner message="You've saved all your free highlights today. Unlock unlimited access for just $1.40 for 6 months 🚀" />
+          <LimitBanner message="You've saved all your free highlights today. Unlock unlimited access for just ₹140 for 6 months 🚀" />
         ) : isWeb ? (
           <>
             <textarea

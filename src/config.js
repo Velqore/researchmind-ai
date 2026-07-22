@@ -15,12 +15,12 @@ export const DEMO_MODE = false;
 export const PAYPAL_PLAN_ID = 'P-0HL98976NA5043041NJPSYHQ';
 export const UPGRADE_URL = `${API_BASE}/pay`;
 
-export const PRICE_LABEL = '$1.40 / 6 months';
-export const PRICE_SUBTEXT = 'One payment · ~23¢ a month';
+export const PRICE_LABEL = '₹140 / 6 months';
+export const PRICE_SUBTEXT = 'One payment · about ₹23 a month';
 export const PLAN_DAYS = 180;
 
 export const LIMIT_HIT_MESSAGE =
-  "You've used all your free summaries today. Unlock unlimited access for just $1.40 for 6 months 🚀";
+  "You've used all your free summaries today. Unlock unlimited access for just ₹140 for 6 months 🚀";
 
 // Free tier daily limits — reset at LOCAL midnight.
 export const DAILY_LIMITS = {

@@ -180,7 +180,7 @@ export default function ResearchTab() {
         </div>
 
         {!isPro && explainLeft === 0 ? (
-          <LimitBanner message="You've used all your free term explanations today. Unlock unlimited access for just $1.40 for 6 months 🚀" />
+          <LimitBanner message="You've used all your free term explanations today. Unlock unlimited access for just ₹140 for 6 months 🚀" />
         ) : (
           <>
             <div className="flex gap-2">
@@ -243,7 +243,7 @@ export default function ResearchTab() {
         </div>
 
         {!isPro && citeLeft === 0 ? (
-          <LimitBanner message="You've used all your free citations today. Unlock unlimited access for just $1.40 for 6 months 🚀" />
+          <LimitBanner message="You've used all your free citations today. Unlock unlimited access for just ₹140 for 6 months 🚀" />
         ) : (
           <>
             {isWeb && !citeText && (
