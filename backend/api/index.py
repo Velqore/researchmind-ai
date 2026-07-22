@@ -554,29 +554,36 @@ async def diag(key: str = ""):
 
 
 async def mint_and_deliver(client: httpx.AsyncClient, email: str, payment_id: str) -> str | None:
-    """Generate a license key, store it, and email it. Idempotent per Razorpay
-    payment_id so a webhook retry (or webhook + client verify) never double-issues.
-    Returns the new key, or None if this payment was already processed."""
+    """Generate a license key, store it, and email it. Resilient: works whether or
+    not the optional `razorpay_payment_id` column exists, and never lets a storage
+    hiccup block the customer's key email. Idempotent per payment_id when possible."""
     if SUPABASE_URL and payment_id:
-        seen = await sb_select(
-            client, "license_keys", f"razorpay_payment_id=eq.{payment_id}&select=id"
-        )
-        if seen:
-            return None
+        try:
+            seen = await sb_select(
+                client, "license_keys", f"razorpay_payment_id=eq.{payment_id}&select=id"
+            )
+            if seen:
+                return None
+        except Exception:
+            pass  # column may not exist yet — fall through and issue the key
+
     key = generate_license_key()
     expires_at = datetime.now(timezone.utc) + timedelta(days=LICENSE_DAYS)
     if SUPABASE_URL:
-        await sb_insert(
-            client,
-            "license_keys",
-            {
-                "key_hash": hash_key(key),
-                "email": email,
-                "expires_at": expires_at.isoformat(),
-                "is_active": True,
-                "razorpay_payment_id": payment_id,
-            },
-        )
+        base = {
+            "key_hash": hash_key(key),
+            "email": email,
+            "expires_at": expires_at.isoformat(),
+            "is_active": True,
+        }
+        try:
+            await sb_insert(client, "license_keys", {**base, "razorpay_payment_id": payment_id})
+        except Exception:
+            # razorpay_payment_id column missing — store the key without it so
+            # activation still works. Run the ALTER in supabase_schema.sql to
+            # restore idempotency.
+            await sb_insert(client, "license_keys", base)
+
     send_license_email(email, key, expires_at)
     return key
 
@@ -629,9 +636,15 @@ async def razorpay_verify(body: RzpVerifyRequest):
         hashlib.sha256,
     ).hexdigest()
     if not hmac.compare_digest(expected, body.razorpay_signature):
-        raise HTTPException(400, "Payment could not be verified.")
-    async with httpx.AsyncClient(timeout=20) as client:
-        await mint_and_deliver(client, body.email.strip(), body.razorpay_payment_id)
+        raise HTTPException(400, "Payment signature could not be verified.")
+    # Signature is valid → deliver the key. Surface the real reason if this fails.
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            await mint_and_deliver(client, body.email.strip(), body.razorpay_payment_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Key delivery failed: {type(e).__name__}: {str(e)[:160]}")
     return {"ok": True}
 
 
