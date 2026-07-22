@@ -75,7 +75,13 @@ RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "")
 RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "")
 RAZORPAY_WEBHOOK_SECRET = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "")
 # Price in paise. ₹120 = 12000 paise (~ $1.40). Override via env if needed.
-PRICE_INR_PAISE = int(os.environ.get("PRICE_INR_PAISE", "12000"))
+# Parsed defensively so a stray value (₹, commas, spaces) can never crash startup.
+def _int_env(name: str, default: int) -> int:
+    digits = re.sub(r"[^\d]", "", str(os.environ.get(name, "") or ""))
+    return int(digits) if digits else default
+
+
+PRICE_INR_PAISE = _int_env("PRICE_INR_PAISE", 12000)
 RAZORPAY_API = "https://api.razorpay.com/v1"
 
 # AI providers — all OpenAI-compatible chat-completions endpoints, tried in
