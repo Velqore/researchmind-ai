@@ -16,7 +16,7 @@ export const PAYPAL_PLAN_ID = 'P-0HL98976NA5043041NJPSYHQ';
 export const UPGRADE_URL = `${API_BASE}/pay`;
 
 export const PRICE_LABEL = '₹140 / 6 months';
-export const PRICE_SUBTEXT = 'One payment · about ₹23 a month';
+export const PRICE_SUBTEXT = 'One payment · about 120₹ for 6 month';
 export const PLAN_DAYS = 180;
 
 export const LIMIT_HIT_MESSAGE =
