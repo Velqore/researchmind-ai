@@ -8,10 +8,15 @@ create table if not exists license_keys (
   email                   text not null,
   paypal_subscription_id  text unique,
   paypal_transaction_id   text,
+  razorpay_payment_id     text unique,
   expires_at              timestamptz not null,
   is_active               boolean not null default true,
   created_at              timestamptz not null default now()
 );
+
+-- If the table already exists (you ran the schema before Razorpay), add the
+-- column with:
+--   alter table license_keys add column if not exists razorpay_payment_id text unique;
 create index if not exists idx_license_keys_hash on license_keys (key_hash);
 create index if not exists idx_license_keys_sub  on license_keys (paypal_subscription_id);
 

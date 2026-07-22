@@ -9,11 +9,11 @@ export const API_BASE = 'https://airesearchmind.vercel.app';
 // the UI without a running backend.
 export const DEMO_MODE = false;
 
-// Real PayPal subscription checkout. The backend serves a hosted checkout
-// page (/checkout) that renders PayPal's official Buttons SDK — the only
-// reliable way to run a subscription, and CSP-safe for the extension.
+// Checkout. The backend hosts two CSP-safe pages:
+//   /pay      — Razorpay UPI / GPay / cards (primary, for India)
+//   /checkout — PayPal subscription (linked from /pay for international buyers)
 export const PAYPAL_PLAN_ID = 'P-0HL98976NA5043041NJPSYHQ';
-export const UPGRADE_URL = `${API_BASE}/checkout`;
+export const UPGRADE_URL = `${API_BASE}/pay`;
 
 export const PRICE_LABEL = '$1.40 / 6 months';
 export const PRICE_SUBTEXT = 'One payment · ~23¢ a month';

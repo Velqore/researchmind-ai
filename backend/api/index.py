@@ -25,6 +25,7 @@ All secrets come from environment variables (Vercel project settings):
 
 import asyncio
 import hashlib
+import hmac
 import os
 import re
 import secrets
@@ -66,6 +67,16 @@ LICENSE_DAYS = 180  # $1.40 per 6-month subscription cycle
 # Public PayPal identifiers used to render the subscription button. Both are
 # publishable (safe in client HTML). The SECRET stays server-side only.
 PAYPAL_PLAN_ID = os.environ.get("PAYPAL_PLAN_ID", "P-0HL98976NA5043041NJPSYHQ")
+
+# Razorpay — UPI / GPay / cards for India. Key ID is publishable; the secret
+# and webhook secret stay server-side. Test keys (rzp_test_...) let us build
+# and verify with fake payments; swap to live keys after KYC to take real money.
+RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "")
+RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "")
+RAZORPAY_WEBHOOK_SECRET = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "")
+# Price in paise. ₹120 = 12000 paise (~ $1.40). Override via env if needed.
+PRICE_INR_PAISE = int(os.environ.get("PRICE_INR_PAISE", "12000"))
+RAZORPAY_API = "https://api.razorpay.com/v1"
 
 # AI providers — all OpenAI-compatible chat-completions endpoints, tried in
 # order with automatic fallback so one provider being down/rate-limited never
@@ -529,6 +540,205 @@ async def diag(key: str = ""):
         "admin_key_set": bool(ADMIN_KEY),
         "results": results,
     }
+
+
+# ------------------------------------------------------------------ Razorpay
+
+
+async def mint_and_deliver(client: httpx.AsyncClient, email: str, payment_id: str) -> str | None:
+    """Generate a license key, store it, and email it. Idempotent per Razorpay
+    payment_id so a webhook retry (or webhook + client verify) never double-issues.
+    Returns the new key, or None if this payment was already processed."""
+    if SUPABASE_URL and payment_id:
+        seen = await sb_select(
+            client, "license_keys", f"razorpay_payment_id=eq.{payment_id}&select=id"
+        )
+        if seen:
+            return None
+    key = generate_license_key()
+    expires_at = datetime.now(timezone.utc) + timedelta(days=LICENSE_DAYS)
+    if SUPABASE_URL:
+        await sb_insert(
+            client,
+            "license_keys",
+            {
+                "key_hash": hash_key(key),
+                "email": email,
+                "expires_at": expires_at.isoformat(),
+                "is_active": True,
+                "razorpay_payment_id": payment_id,
+            },
+        )
+    send_license_email(email, key, expires_at)
+    return key
+
+
+class RzpOrderRequest(BaseModel):
+    email: str
+
+
+@app.post("/razorpay/order")
+async def razorpay_order(body: RzpOrderRequest):
+    require_env(("RAZORPAY_KEY_ID", RAZORPAY_KEY_ID), ("RAZORPAY_KEY_SECRET", RAZORPAY_KEY_SECRET))
+    email = body.email.strip()
+    if "@" not in email or "." not in email:
+        raise HTTPException(400, "Please enter a valid email address.")
+    async with httpx.AsyncClient(timeout=20) as client:
+        r = await client.post(
+            f"{RAZORPAY_API}/orders",
+            auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET),
+            json={
+                "amount": PRICE_INR_PAISE,
+                "currency": "INR",
+                "receipt": f"rm_{secrets.token_hex(8)}",
+                "notes": {"email": email},
+            },
+        )
+        if r.status_code >= 400:
+            raise HTTPException(502, f"Could not start payment: {r.text[:160]}")
+        order = r.json()
+    return {
+        "order_id": order["id"],
+        "key_id": RAZORPAY_KEY_ID,
+        "amount": PRICE_INR_PAISE,
+        "currency": "INR",
+    }
+
+
+class RzpVerifyRequest(BaseModel):
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
+    email: str
+
+
+@app.post("/razorpay/verify")
+async def razorpay_verify(body: RzpVerifyRequest):
+    require_env(("RAZORPAY_KEY_SECRET", RAZORPAY_KEY_SECRET))
+    expected = hmac.new(
+        RAZORPAY_KEY_SECRET.encode(),
+        f"{body.razorpay_order_id}|{body.razorpay_payment_id}".encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(expected, body.razorpay_signature):
+        raise HTTPException(400, "Payment could not be verified.")
+    async with httpx.AsyncClient(timeout=20) as client:
+        await mint_and_deliver(client, body.email.strip(), body.razorpay_payment_id)
+    return {"ok": True}
+
+
+@app.post("/razorpay/webhook")
+async def razorpay_webhook(request: Request):
+    """Backup delivery path: Razorpay POSTs payment.captured here. Verifies the
+    webhook signature, then mints+emails the key (idempotent)."""
+    if not RAZORPAY_WEBHOOK_SECRET:
+        raise HTTPException(503, "Webhook not configured.")
+    raw = await request.body()
+    sig = request.headers.get("x-razorpay-signature", "")
+    expected = hmac.new(RAZORPAY_WEBHOOK_SECRET.encode(), raw, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, sig):
+        raise HTTPException(400, "Invalid webhook signature.")
+    event = await request.json()
+    if event.get("event") in ("payment.captured", "order.paid"):
+        entity = (
+            event.get("payload", {}).get("payment", {}).get("entity", {})
+        )
+        email = entity.get("notes", {}).get("email") or entity.get("email", "")
+        payment_id = entity.get("id", "")
+        if email and payment_id:
+            async with httpx.AsyncClient(timeout=20) as client:
+                await mint_and_deliver(client, email, payment_id)
+    return {"status": "ok"}
+
+
+@app.get("/pay", response_class=HTMLResponse)
+async def pay():
+    """Hosted Razorpay checkout — UPI / GPay / cards for India. Opened in a new
+    tab by the app (CSP-safe). Collects the buyer's email, creates an order, runs
+    Razorpay Checkout, verifies, and the key is emailed on success."""
+    if not RAZORPAY_KEY_ID:
+        return HTMLResponse(
+            "<h2 style='font-family:sans-serif'>UPI checkout isn't configured yet.</h2>",
+            status_code=503,
+        )
+    rupees = PRICE_INR_PAISE // 100
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Upgrade to ResearchMind Pro</title>
+<style>
+  body{{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+    font-family:Inter,system-ui,sans-serif;color:#f5edda;
+    background:radial-gradient(90% 70% at 50% -20%,#17203a,transparent 55%),#05070f}}
+  .card{{max-width:420px;width:100%;margin:20px;padding:30px 26px;border-radius:24px;text-align:center;
+    border:1px solid rgba(227,189,118,.2);background:rgba(255,255,255,.04)}}
+  .em{{font-size:30px}}
+  h1{{font-size:21px;margin:8px 0 2px;font-family:Georgia,serif}}
+  .grad{{background:linear-gradient(120deg,#f4d99a,#c69a4c);-webkit-background-clip:text;
+    background-clip:text;color:transparent}}
+  .price{{font-size:28px;font-weight:800;margin:14px 0 2px}}
+  .sub{{font-size:12.5px;color:#9fb0cf;margin-bottom:18px}}
+  input{{width:100%;box-sizing:border-box;padding:13px 15px;border-radius:12px;margin-bottom:12px;
+    background:rgba(0,0,0,.3);border:1px solid rgba(227,189,118,.25);color:#f5edda;font-size:14px}}
+  button{{width:100%;padding:14px;border:none;border-radius:14px;font-size:15px;font-weight:700;
+    cursor:pointer;color:#1c1204;background:linear-gradient(120deg,#f4d99a,#e3bd76,#c69a4c);
+    box-shadow:0 10px 30px rgba(227,189,118,.4)}}
+  button:disabled{{opacity:.6;cursor:default}}
+  .note{{font-size:11px;color:#64748b;margin-top:16px;line-height:1.5}}
+  .ok,.err{{display:none;margin-top:14px;padding:14px;border-radius:12px;font-size:13px;line-height:1.6;text-align:left}}
+  .ok{{background:rgba(52,211,153,.12);border:1px solid rgba(52,211,153,.3);color:#a7f3d0}}
+  .err{{background:rgba(244,63,94,.12);border:1px solid rgba(244,63,94,.3);color:#fecaca}}
+  a{{color:#9fb0cf;font-size:11.5px}}
+</style></head><body><div class="card">
+  <div class="em">🚀</div>
+  <h1>ResearchMind <span class="grad">Pro</span></h1>
+  <div class="price">₹{rupees} <span style="font-size:14px;color:#9fb0cf">/ 6 months</span></div>
+  <div class="sub">UPI · GPay · PhonePe · Cards — one payment, no auto-renew</div>
+  <div id="form">
+    <input id="email" type="email" placeholder="Your email (your key is sent here)" autocomplete="email">
+    <button id="payBtn" onclick="pay()">Pay ₹{rupees} with UPI / Card</button>
+  </div>
+  <div id="ok" class="ok">✅ Payment successful! Your license key has been emailed to you —
+    check your inbox (and spam) in a minute, then paste it into ResearchMind → Settings.</div>
+  <div id="err" class="err"></div>
+  <p class="note">Secure payment via Razorpay · License key sent by email<br>
+    <a href="/checkout">Outside India? Pay with PayPal →</a></p>
+</div>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script>
+  function showErr(m){{var e=document.getElementById('err');e.style.display='block';e.textContent=m;}}
+  async function pay(){{
+    var email=document.getElementById('email').value.trim();
+    if(!email||email.indexOf('@')<0){{showErr('Please enter a valid email — your key is sent there.');return;}}
+    var btn=document.getElementById('payBtn');btn.disabled=true;btn.textContent='Starting…';
+    try{{
+      var res=await fetch('/razorpay/order',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+        body:JSON.stringify({{email:email}})}});
+      if(!res.ok){{throw new Error((await res.json()).detail||'Could not start payment');}}
+      var o=await res.json();
+      var rzp=new Razorpay({{
+        key:o.key_id, order_id:o.order_id, amount:o.amount, currency:o.currency,
+        name:'ResearchMind AI', description:'Pro — 6 months', prefill:{{email:email}},
+        theme:{{color:'#c69a4c'}},
+        handler:async function(resp){{
+          var v=await fetch('/razorpay/verify',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+            body:JSON.stringify({{razorpay_order_id:resp.razorpay_order_id,
+              razorpay_payment_id:resp.razorpay_payment_id,
+              razorpay_signature:resp.razorpay_signature, email:email}})}});
+          if(v.ok){{document.getElementById('form').style.display='none';
+            document.getElementById('ok').style.display='block';}}
+          else{{showErr('Payment captured but verification failed — email support with your payment id.');}}
+        }},
+        modal:{{ondismiss:function(){{btn.disabled=false;btn.textContent='Pay ₹{rupees} with UPI / Card';}}}}
+      }});
+      rzp.on('payment.failed',function(r){{showErr('Payment failed: '+(r.error&&r.error.description||'try again'));
+        btn.disabled=false;btn.textContent='Pay ₹{rupees} with UPI / Card';}});
+      rzp.open();
+    }}catch(e){{showErr(e.message||'Something went wrong.');
+      btn.disabled=false;btn.textContent='Pay ₹{rupees} with UPI / Card';}}
+  }}
+</script>
+</body></html>"""
 
 
 @app.get("/checkout", response_class=HTMLResponse)
