@@ -525,6 +525,25 @@ async def test_email(key: str = "", to: str = ""):
         raise HTTPException(500, f"SMTP failed: {type(e).__name__}: {str(e)[:200]}")
 
 
+@app.get("/test-mint")
+async def test_mint(key: str = "", to: str = ""):
+    """Admin-only: runs the exact post-payment key delivery (mint → store → email)
+    so we can see any error without needing a real payment. ?key=<ADMIN>&to=email"""
+    if not ADMIN_KEY or key.strip().upper() != ADMIN_KEY:
+        raise HTTPException(403, "Admin key required.")
+    recipient = to.strip() or os.environ.get("SMTP_USER", "")
+    if not recipient:
+        raise HTTPException(400, "Pass ?to=an-email-address.")
+    try:
+        async with httpx.AsyncClient(timeout=25) as client:
+            k = await mint_and_deliver(client, recipient, "test_" + secrets.token_hex(6))
+        return {"delivered": bool(k), "to": recipient}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Delivery failed: {type(e).__name__}: {str(e)[:220]}")
+
+
 @app.get("/diag")
 async def diag(key: str = ""):
     """Admin-only provider health check: ?key=<ADMIN_KEY>. Reports which AI
