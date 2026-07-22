@@ -542,10 +542,30 @@ async def diag(key: str = ""):
                                 "error": f"HTTP {e.response.status_code}", "body": e.response.text[:160]})
             except Exception as e:
                 results.append({"provider": label, "model": model, "ok": False, "error": type(e).__name__})
+    # Razorpay: confirm the keys in this environment are valid + can create orders.
+    rzp = {
+        "key_id": RAZORPAY_KEY_ID or None,
+        "secret_set": bool(RAZORPAY_KEY_SECRET),
+        "secret_len": len(RAZORPAY_KEY_SECRET),
+        "secret_tail": RAZORPAY_KEY_SECRET[-4:] if RAZORPAY_KEY_SECRET else "",
+        "price_inr": PRICE_INR,
+    }
+    if RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
+        try:
+            async with httpx.AsyncClient(timeout=20) as c:
+                r = await c.post(
+                    f"{RAZORPAY_API}/orders",
+                    auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET),
+                    json={"amount": PRICE_INR_PAISE, "currency": "INR", "receipt": "diag"},
+                )
+            rzp["order_test"] = "ok" if r.status_code < 400 else f"HTTP {r.status_code}: {r.text[:120]}"
+        except Exception as e:
+            rzp["order_test"] = type(e).__name__
     return {
         "providers_configured": [p[0] for p in ai_providers()],
         "supabase": bool(SUPABASE_URL),
         "admin_key_set": bool(ADMIN_KEY),
+        "razorpay": rzp,
         "results": results,
     }
 
@@ -748,7 +768,8 @@ async def pay():
               razorpay_signature:resp.razorpay_signature, email:email}})}});
           if(v.ok){{document.getElementById('form').style.display='none';
             document.getElementById('ok').style.display='block';}}
-          else{{showErr('Payment captured but verification failed — email support with your payment id.');}}
+          else{{var m='verification failed';try{{m=(await v.json()).detail||m;}}catch(e){{}}
+            showErr('Payment captured but '+m+' · payment id: '+resp.razorpay_payment_id);}}
         }},
         modal:{{ondismiss:function(){{btn.disabled=false;btn.textContent='Pay ₹{rupees} with UPI / Card';}}}}
       }});
