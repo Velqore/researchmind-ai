@@ -54,8 +54,12 @@ app.add_middleware(
 
 # --------------------------------------------------------------------- config
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
-SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
+# Tolerate a URL entered without the scheme (e.g. "abc.supabase.co") — httpx
+# needs an explicit https:// or every Supabase call fails with UnsupportedProtocol.
+if SUPABASE_URL and not SUPABASE_URL.startswith(("http://", "https://")):
+    SUPABASE_URL = "https://" + SUPABASE_URL
+SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 PAYPAL_API = os.environ.get("PAYPAL_API_BASE", "https://api-m.sandbox.paypal.com").rstrip("/")
 PAYPAL_CLIENT_ID = os.environ.get("PAYPAL_CLIENT_ID", "")
 PAYPAL_CLIENT_SECRET = os.environ.get("PAYPAL_CLIENT_SECRET", "")
