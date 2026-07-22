@@ -74,14 +74,16 @@ PAYPAL_PLAN_ID = os.environ.get("PAYPAL_PLAN_ID", "P-0HL98976NA5043041NJPSYHQ")
 RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "")
 RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "")
 RAZORPAY_WEBHOOK_SECRET = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "")
-# Price in paise. ₹120 = 12000 paise (~ $1.40). Override via env if needed.
-# Parsed defensively so a stray value (₹, commas, spaces) can never crash startup.
+# Price. Set PRICE_INR in the env in plain RUPEES (e.g. 120). Parsed defensively
+# so a stray value (₹, commas, spaces) can never crash startup. Razorpay wants
+# paise on the wire, so we convert (₹120 → 12000 paise).
 def _int_env(name: str, default: int) -> int:
     digits = re.sub(r"[^\d]", "", str(os.environ.get(name, "") or ""))
     return int(digits) if digits else default
 
 
-PRICE_INR_PAISE = _int_env("PRICE_INR_PAISE", 12000)
+PRICE_INR = _int_env("PRICE_INR", 120)  # rupees
+PRICE_INR_PAISE = PRICE_INR * 100
 RAZORPAY_API = "https://api.razorpay.com/v1"
 
 # AI providers — all OpenAI-compatible chat-completions endpoints, tried in
