@@ -61,6 +61,14 @@ html.full-page,
 html.full-page body {
   width: 100%;
 }
+/* Clip the <html> element itself to the visible viewport. Without this it
+   defaults to the full window height (larger than 100dvh on mobile), leaving a
+   scrollable empty gap below the app. */
+html.full-page {
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
 html.full-page body {
   height: 100vh;
   height: 100dvh; /* mobile-safe: excludes address bar so the tab bar stays on-screen */
