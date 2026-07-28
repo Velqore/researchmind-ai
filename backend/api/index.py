@@ -102,6 +102,9 @@ HF_TOKEN = os.environ.get("HF_TOKEN", "")
 MODEL_ID = os.environ.get("MODEL_ID", "Qwen/Qwen2.5-72B-Instruct")
 HF_CHAT_URL = "https://router.huggingface.co/v1/chat/completions"
 
+# SerpAPI — real Google Scholar search for the paper-discovery feature.
+SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
+
 
 def ai_providers() -> list[tuple[str, str, str, str]]:
     """(label, url, api_key, model) in priority order — Groq first, HF fallback."""
@@ -1451,3 +1454,55 @@ async def pro_tool(body: ProToolRequest, request: Request):
     cap = PRO_MAX_INPUT_CHARS if pro else FREE_MAX_INPUT_CHARS
     result = await llm_chat(system, clamp_for_llm(text, cap), max_tokens=max_tokens)
     return {"result": result}
+
+
+# ------------------------------------------------- Google Scholar paper search
+
+
+class ScholarRequest(BaseModel):
+    query: str
+
+
+@app.post("/search-papers")
+async def search_papers(body: ScholarRequest, request: Request):
+    """Search real academic papers via SerpAPI's Google Scholar engine. Returns
+    title, authors, year, citation count, link and PDF for each result. Pro-gated
+    to protect the shared SerpAPI quota."""
+    require_env(("SERPAPI_KEY", SERPAPI_KEY))
+    q = body.query.strip()
+    if len(q) < 3:
+        raise HTTPException(400, "Enter at least a few words to search.")
+    await enforce_tier(request, "paper_search", pro_only=True)
+
+    async with httpx.AsyncClient(timeout=25) as client:
+        r = await client.get(
+            "https://serpapi.com/search",
+            params={"engine": "google_scholar", "q": q, "api_key": SERPAPI_KEY, "num": 10},
+        )
+    if r.status_code >= 400:
+        raise HTTPException(502, "Paper search is temporarily unavailable. Please try again.")
+    data = r.json()
+
+    papers = []
+    for it in (data.get("organic_results") or [])[:10]:
+        pub = it.get("publication_info", {}) or {}
+        summary = pub.get("summary", "")
+        year = ""
+        m = re.search(r"\b(19|20)\d{2}\b", summary)
+        if m:
+            year = m.group(0)
+        resources = it.get("resources") or []
+        pdf = next((x.get("link", "") for x in resources if x.get("file_format") == "PDF"), "")
+        cited = (it.get("inline_links", {}).get("cited_by", {}) or {}).get("total", 0)
+        papers.append(
+            {
+                "title": it.get("title", ""),
+                "link": it.get("link", ""),
+                "snippet": it.get("snippet", ""),
+                "authors": summary,
+                "year": year,
+                "cited_by": cited,
+                "pdf": pdf,
+            }
+        )
+    return {"papers": papers, "query": q}

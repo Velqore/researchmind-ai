@@ -109,6 +109,15 @@ export async function proTool({ tool, text, papers, option, licenseKey }) {
   return post('/pro-tool', { tool, text, papers, option }, licenseKey);
 }
 
+/** Pro: search real academic papers via Google Scholar. */
+export async function searchPapers({ query, licenseKey }) {
+  if (DEMO_MODE) {
+    await delay(1200);
+    return { papers: [], query };
+  }
+  return post('/search-papers', { query }, licenseKey);
+}
+
 export async function generateCitation({ url, title, style, text, concept, licenseKey }) {
   if (DEMO_MODE) {
     await delay(900);
