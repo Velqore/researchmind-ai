@@ -26,6 +26,7 @@ All secrets come from environment variables (Vercel project settings):
 import asyncio
 import hashlib
 import hmac
+import json
 import os
 import re
 import secrets
@@ -140,7 +141,8 @@ def clamp_for_llm(text: str, cap: int = HARD_MAX_INPUT_CHARS) -> str:
 
 # Server-side free-tier limits (per hashed IP per UTC day) — a backstop for
 # the client-side chrome.storage limits, so a modified client can't bypass them.
-FREE_DAILY_LIMITS = {"summarize": 3, "explain": 5, "cite": 2}
+# paper_search is free but capped to protect the shared SerpAPI quota.
+FREE_DAILY_LIMITS = {"summarize": 3, "explain": 5, "cite": 2, "paper_search": 8}
 
 
 def require_env(*pairs: tuple[str, str]) -> None:
@@ -1472,7 +1474,18 @@ async def search_papers(body: ScholarRequest, request: Request):
     q = body.query.strip()
     if len(q) < 3:
         raise HTTPException(400, "Enter at least a few words to search.")
-    await enforce_tier(request, "paper_search", pro_only=True)
+
+    # Cache identical queries for 24h — a repeated search costs no SerpAPI call
+    # and no daily-limit use, which stretches the shared quota a long way.
+    cache_key = "scholar:" + q.lower()
+    cached = await cache_get(cache_key, "")
+    if cached:
+        try:
+            return {"papers": json.loads(cached), "query": q, "cached": True}
+        except Exception:
+            pass
+
+    await enforce_tier(request, "paper_search")
 
     async with httpx.AsyncClient(timeout=25) as client:
         r = await client.get(
@@ -1505,4 +1518,6 @@ async def search_papers(body: ScholarRequest, request: Request):
                 "pdf": pdf,
             }
         )
-    return {"papers": papers, "query": q}
+    if papers:
+        await cache_put(cache_key, "", json.dumps(papers))
+    return {"papers": papers, "query": q, "cached": False}

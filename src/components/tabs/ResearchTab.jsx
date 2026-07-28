@@ -52,7 +52,6 @@ export default function ResearchTab() {
   const runSearch = async () => {
     const q = searchQuery.trim();
     if (q.length < 3) return;
-    if (!isPro) return openUpgrade();
     setSearchState('loading');
     setSearchError('');
     setPapersFound([]);
@@ -227,12 +226,7 @@ export default function ResearchTab() {
       <div className="glass p-4">
         <div className="mb-2.5 flex items-start justify-between">
           <div>
-            <h2 className="flex items-center gap-2 text-[13.5px] font-bold text-white">
-              Find research papers
-              <span className="rounded-md bg-amber-400/15 px-1.5 py-0.5 text-[10px] font-bold text-amber-300">
-                PRO
-              </span>
-            </h2>
+            <h2 className="text-[13.5px] font-bold text-white">Find research papers</h2>
             <p className="mt-0.5 text-[11.5px] text-slate-400">
               Search Google Scholar — real papers, authors &amp; citations
             </p>
@@ -252,9 +246,10 @@ export default function ResearchTab() {
           <button
             onClick={runSearch}
             disabled={searchState === 'loading' || searchQuery.trim().length < 3}
-            className="btn-primary shrink-0 px-4"
+            className="grad shrink-0 rounded-xl px-4 text-[12.5px] font-bold text-[#1c1204] transition-all duration-150 hover:brightness-105 active:scale-95 disabled:opacity-50"
+            aria-label="Search"
           >
-            {searchState === 'loading' ? '…' : 'Search'}
+            {searchState === 'loading' ? '…' : '🔎'}
           </button>
         </div>
 
