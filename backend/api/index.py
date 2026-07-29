@@ -1077,6 +1077,44 @@ SUMMARY_STYLES = {
 }
 
 
+def extract_pdf_text(data: bytes, url: str) -> tuple[str, str]:
+    """Pull readable text out of a fetched PDF. Returns (title, text).
+    Raises a friendly error for scanned/image-only PDFs that carry no text."""
+    try:
+        from io import BytesIO
+
+        from pypdf import PdfReader
+
+        reader = PdfReader(BytesIO(data))
+        pages = []
+        for page in reader.pages[:60]:  # cap: enough for a long paper
+            try:
+                pages.append(page.extract_text() or "")
+            except Exception:
+                continue
+        text = "\n\n".join(p for p in pages if p.strip())
+        title = ""
+        try:
+            title = (reader.metadata.title or "").strip() if reader.metadata else ""
+        except Exception:
+            title = ""
+    except Exception:
+        raise HTTPException(
+            400,
+            "That PDF couldn't be read. Try downloading it and using the upload button instead.",
+        )
+
+    text = re.sub(r"[ \t\r\f]+", " ", text)
+    text = re.sub(r"\n\s*\n+", "\n\n", text).strip()
+    if len(text) < 200:
+        raise HTTPException(
+            400,
+            "This PDF has no selectable text (it looks scanned). Try another link, "
+            "or upload a text-based PDF.",
+        )
+    return (title or url), text[:HARD_MAX_INPUT_CHARS]
+
+
 async def fetch_page_text(url: str) -> tuple[str, str]:
     """Server-side page fetch for the web app (browsers can't cross-origin
     fetch arbitrary sites). Returns (title, text). Basic SSRF guard: http(s)
@@ -1093,19 +1131,27 @@ async def fetch_page_text(url: str) -> tuple[str, str]:
         raise HTTPException(400, "That URL can't be fetched.")
     try:
         async with httpx.AsyncClient(
-            timeout=20,
+            timeout=25,
             follow_redirects=True,
             headers={"User-Agent": "Mozilla/5.0 (compatible; ResearchMindBot/1.0)"},
         ) as client:
             r = await client.get(url)
             r.raise_for_status()
-            html = r.text[:800_000]
+            raw = r.content[:12_000_000]
+            ctype = (r.headers.get("content-type") or "").lower()
     except HTTPException:
         raise
     except Exception:
         raise HTTPException(
             400, "Couldn't fetch that URL — check the link, or paste the text instead."
         )
+
+    # PDFs are binary — extract real text instead of stripping "tags" from bytes
+    # (which fed raw PDF internals like "endobj/xref/stream" to the model).
+    if "application/pdf" in ctype or raw[:5] == b"%PDF-":
+        return extract_pdf_text(raw, url)
+
+    html = raw.decode(r.encoding or "utf-8", errors="replace")[:800_000]
     title_m = re.search(r"(?is)<title[^>]*>(.*?)</title>", html)
     html = re.sub(
         r"(?is)<(script|style|noscript|nav|footer|header|aside|svg)[^>]*>.*?</\1>", " ", html
@@ -1151,6 +1197,9 @@ async def summarize(body: SummarizeRequest, request: Request):
     summary = await llm_chat(
         "You are ResearchMind, an expert research assistant. Summarize accurately — "
         "never invent facts, numbers, or citations not present in the text. "
+        "If the supplied content is unreadable, truncated, or clearly not the "
+        "article (e.g. binary junk or an error page), say so plainly in one line "
+        "and stop — do NOT reconstruct a summary from the title or prior knowledge. "
         "Use **bold** for section headers and '• ' for bullets. " + SUMMARY_STYLES[length],
         f"Title: {title}\n\nContent:\n{clamp_for_llm(text, cap)}",
         max_tokens=900,
