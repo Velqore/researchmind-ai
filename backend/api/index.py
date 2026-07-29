@@ -106,6 +106,26 @@ HF_CHAT_URL = "https://router.huggingface.co/v1/chat/completions"
 # SerpAPI — real Google Scholar search for the paper-discovery feature.
 SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
 
+# Citation styles the generator accepts. Kept in sync with CITE_STYLES in
+# src/components/tabs/ResearchTab.jsx.
+CITATION_STYLES = (
+    "APA",
+    "MLA",
+    "Chicago",
+    "Harvard",
+    "IEEE",
+    "Vancouver",
+    "AMA",
+    "ACS",
+    "APSA",
+    "ASA",
+    "Turabian",
+    "Bluebook",
+    "OSCOLA",
+    "NLM",
+    "CSE",
+)
+
 
 def ai_providers() -> list[tuple[str, str, str, str]]:
     """(label, url, api_key, model) in priority order — Groq first, HF fallback."""
@@ -1170,7 +1190,7 @@ class CiteRequest(BaseModel):
 
 @app.post("/cite")
 async def cite(body: CiteRequest, request: Request):
-    style = body.style if body.style in ("APA", "MLA", "Chicago") else "APA"
+    style = body.style if body.style in CITATION_STYLES else "APA"
     await enforce_tier(request, "cite")
     today = datetime.now(timezone.utc).strftime("%B %d, %Y")
 

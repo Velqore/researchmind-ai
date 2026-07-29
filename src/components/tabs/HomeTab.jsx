@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { useApp } from '../../AppContext';
-import { getCurrentPage, summarize } from '../../lib/api';
+import { getCurrentPage, searchPapers, summarize } from '../../lib/api';
 import { ACCEPT_ATTR, extractErrorMessage, extractFromFile } from '../../lib/extract';
 import { isWeb } from '../../lib/storage';
 import ErrorCard from '../ErrorCard';
@@ -32,8 +32,31 @@ export default function HomeTab() {
   const [fileError, setFileError] = useState('');
   const [dragging, setDragging] = useState(false);
 
-  // Web mode: summarize a pasted link (the backend fetches it server-side)
-  const [urlInput, setUrlInput] = useState('');
+  // Paper search (Google Scholar) — discover papers, then summarize or grab the PDF
+  const [query, setQuery] = useState('');
+  const [searchState, setSearchState] = useState('idle'); // idle | loading | done | error
+  const [papers, setPapers] = useState([]);
+  const [searchError, setSearchError] = useState('');
+
+  const runSearch = async () => {
+    const q = query.trim();
+    if (q.length < 3) return;
+    setSearchState('loading');
+    setSearchError('');
+    setPapers([]);
+    try {
+      const res = await searchPapers({ query: q, licenseKey: license.key });
+      setPapers(res.papers || []);
+      setSearchState('done');
+    } catch (err) {
+      setSearchError(err.message || 'Search failed. Please try again.');
+      setSearchState('error');
+    }
+  };
+
+  /** Summarize a paper from the search results (backend fetches the URL). */
+  const summarizePaper = (paper) =>
+    runSummarize({ url: paper.pdf || paper.link, title: paper.title, text: '' });
 
   const left = remainingFor('summarize');
   const limitHit = !isPro && left === 0;
@@ -82,17 +105,6 @@ export default function HomeTab() {
   };
 
   const summarizeDoc = () => doc && runSummarize(doc);
-
-  const summarizeUrl = () => {
-    const url = urlInput.trim();
-    if (!/^https?:\/\/\S+\.\S+/.test(url)) {
-      setErrorKind('server');
-      setFileError('Please enter a full link starting with http:// or https://');
-      return;
-    }
-    setFileError('');
-    runSummarize({ url, title: '', text: '' });
-  };
 
   const handleFile = async (file) => {
     if (!file) return;
@@ -160,29 +172,108 @@ export default function HomeTab() {
             {!doc && !extracting && (
               isWeb ? (
                 <>
-                  <input
-                    value={urlInput}
-                    onChange={(e) => setUrlInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && summarizeUrl()}
-                    placeholder="Paste a link — article, paper, blog post…"
-                    spellCheck={false}
-                    className="input-dark"
-                    aria-label="Link to summarize"
-                  />
-                  <button
-                    onClick={summarizeUrl}
-                    disabled={state === 'loading' || !urlInput.trim()}
-                    className="btn-primary mt-2.5"
-                  >
-                    {state === 'loading' ? (
-                      <>
-                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                        Reading & summarizing…
-                      </>
-                    ) : (
-                      <>✨ Summarize link</>
-                    )}
-                  </button>
+                  {/* Search papers, or paste a link — both feed the summarizer */}
+                  <div className="flex gap-2">
+                    <input
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && runSearch()}
+                      placeholder="Search a topic, or paste a link…"
+                      spellCheck={false}
+                      className="input-dark"
+                      aria-label="Search papers or paste a link"
+                    />
+                    <button
+                      onClick={() =>
+                        /^https?:\/\/\S+\.\S+/.test(query.trim())
+                          ? runSummarize({ url: query.trim(), title: '', text: '' })
+                          : runSearch()
+                      }
+                      disabled={
+                        searchState === 'loading' || state === 'loading' || query.trim().length < 3
+                      }
+                      className="grad shrink-0 rounded-xl px-4 text-[13px] font-bold text-[#1c1204] transition-all duration-150 hover:brightness-105 active:scale-95 disabled:opacity-50"
+                      aria-label="Search papers"
+                    >
+                      {searchState === 'loading' || state === 'loading' ? '…' : '🔎'}
+                    </button>
+                  </div>
+
+                  {searchState === 'error' && (
+                    <p className="animate-fade-in mt-2 text-center text-[11.5px] font-medium text-rose-400">
+                      {searchError}
+                    </p>
+                  )}
+                  {searchState === 'loading' && (
+                    <div className="mt-3">
+                      <SkeletonCard />
+                    </div>
+                  )}
+                  {searchState === 'done' && papers.length === 0 && (
+                    <p className="mt-3 text-center text-[11.5px] text-slate-400">
+                      No papers found — try different keywords.
+                    </p>
+                  )}
+                  {searchState === 'done' && papers.length > 0 && (
+                    <ul className="animate-fade-in mt-3 max-h-[300px] space-y-2 overflow-y-auto pr-1">
+                      {papers.map((p, i) => (
+                        <li
+                          key={i}
+                          className="glass-hover rounded-xl border border-white/[0.06] bg-white/[0.03] p-3"
+                        >
+                          <button
+                            onClick={() => summarizePaper(p)}
+                            className="w-full text-left"
+                            title="Summarize this paper"
+                          >
+                            <span className="line-clamp-2 text-[12.5px] font-semibold leading-snug text-slate-100">
+                              {p.title}
+                            </span>
+                            {p.authors && (
+                              <span className="mt-1 line-clamp-1 block text-[10.5px] text-slate-400">
+                                {p.authors}
+                              </span>
+                            )}
+                          </button>
+                          <div className="mt-2 flex flex-wrap items-center gap-2 text-[10.5px]">
+                            {p.cited_by > 0 && (
+                              <span className="rounded-md bg-white/[0.06] px-1.5 py-0.5 font-medium text-slate-300">
+                                Cited by {p.cited_by}
+                              </span>
+                            )}
+                            <button
+                              onClick={() => summarizePaper(p)}
+                              className="font-semibold text-brand-cyan hover:underline"
+                            >
+                              ✨ Summarize
+                            </button>
+                            {p.pdf ? (
+                              <a
+                                href={p.pdf}
+                                target="_blank"
+                                rel="noreferrer"
+                                download
+                                className="font-semibold text-brand-violet hover:underline"
+                              >
+                                ⬇ Download PDF
+                              </a>
+                            ) : (
+                              p.link && (
+                                <a
+                                  href={p.link}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="font-medium text-slate-400 hover:underline"
+                                >
+                                  Open ↗
+                                </a>
+                              )
+                            )}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </>
               ) : (
                 <button

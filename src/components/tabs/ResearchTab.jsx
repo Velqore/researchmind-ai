@@ -1,13 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../../AppContext';
-import {
-  explainTerm,
-  generateCitation,
-  getCurrentPage,
-  getSelection,
-  proTool,
-  searchPapers,
-} from '../../lib/api';
+import { explainTerm, generateCitation, getCurrentPage, getSelection, proTool } from '../../lib/api';
 import { isWeb } from '../../lib/storage';
 import ErrorCard from '../ErrorCard';
 import LimitBanner from '../LimitBanner';
@@ -16,7 +9,24 @@ import { SkeletonLines } from '../Skeleton';
 import UploadButton from '../UploadButton';
 import UsageBar from '../UsageBar';
 
-const CITE_STYLES = ['APA', 'MLA', 'Chicago'];
+// Keep in sync with CITATION_STYLES in backend/api/index.py
+const CITE_STYLES = [
+  'APA',
+  'MLA',
+  'Chicago',
+  'Harvard',
+  'IEEE',
+  'Vancouver',
+  'AMA',
+  'ACS',
+  'APSA',
+  'ASA',
+  'Turabian',
+  'Bluebook',
+  'OSCOLA',
+  'NLM',
+  'CSE',
+];
 
 // Every Pro tool is live and backed by real AI, grounded in the user's own
 // pasted text (no fabricated citations). `mode` drives the input UI:
@@ -42,28 +52,6 @@ const PRO_TOOLS = [
 
 export default function ResearchTab() {
   const { isPro, license, remainingFor, useFeature, openUpgrade } = useApp();
-
-  // --- Paper search (Google Scholar) ---
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchState, setSearchState] = useState('idle'); // idle | loading | done | error
-  const [papersFound, setPapersFound] = useState([]);
-  const [searchError, setSearchError] = useState('');
-
-  const runSearch = async () => {
-    const q = searchQuery.trim();
-    if (q.length < 3) return;
-    setSearchState('loading');
-    setSearchError('');
-    setPapersFound([]);
-    try {
-      const res = await searchPapers({ query: q, licenseKey: license.key });
-      setPapersFound(res.papers || []);
-      setSearchState('done');
-    } catch (err) {
-      setSearchError(err.message || 'Search failed. Please try again.');
-      setSearchState('error');
-    }
-  };
 
   // --- Term explainer ---
   const [term, setTerm] = useState('');
@@ -152,32 +140,6 @@ export default function ResearchTab() {
     setTimeout(() => setCiteCopied(false), 1500);
   };
 
-  // Cite a specific paper (from the Scholar search results) into the citation card.
-  const handleCiteFor = async (url, title) => {
-    if (!url) return;
-    setCiteState('loading');
-    setCitation(null);
-    try {
-      const res = await generateCitation({
-        url,
-        title,
-        style: 'APA',
-        text: '',
-        concept: '',
-        licenseKey: license.key,
-      });
-      const allowed = await useFeature('cite');
-      if (!allowed) {
-        setCiteState('idle');
-        return;
-      }
-      setCitation(res.citation);
-      setCiteState('done');
-    } catch {
-      setCiteState('error');
-    }
-  };
-
   // --- Pro tools (config-driven; all live) ---
   const [tool, setTool] = useState(null); // the active PRO_TOOLS entry, or null
   const [papers, setPapers] = useState(['', '']);
@@ -222,125 +184,6 @@ export default function ResearchTab() {
 
   return (
     <div className="space-y-3 py-2">
-      {/* ---- Paper search (Google Scholar) ---- */}
-      <div className="glass p-4">
-        <div className="mb-2.5 flex items-start justify-between">
-          <div>
-            <h2 className="text-[13.5px] font-bold text-white">Find research papers</h2>
-            <p className="mt-0.5 text-[11.5px] text-slate-400">
-              Search Google Scholar — real papers, authors &amp; citations
-            </p>
-          </div>
-          <span className="text-xl">🔎</span>
-        </div>
-
-        <div className="flex gap-2">
-          <input
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && runSearch()}
-            placeholder="e.g. transformer models for protein folding"
-            className="input-dark"
-            aria-label="Search research papers"
-          />
-          <button
-            onClick={runSearch}
-            disabled={searchState === 'loading' || searchQuery.trim().length < 3}
-            className="grad shrink-0 rounded-xl px-4 text-[12.5px] font-bold text-[#1c1204] transition-all duration-150 hover:brightness-105 active:scale-95 disabled:opacity-50"
-            aria-label="Search"
-          >
-            {searchState === 'loading' ? '…' : '🔎'}
-          </button>
-        </div>
-
-        {searchState === 'loading' && (
-          <div className="mt-3">
-            <SkeletonLines lines={4} />
-          </div>
-        )}
-        {searchState === 'error' && (
-          <p className="animate-fade-in mt-2.5 text-center text-[11.5px] font-medium text-rose-400">
-            {searchError}
-          </p>
-        )}
-        {searchState === 'done' && papersFound.length === 0 && (
-          <p className="mt-3 text-center text-[11.5px] text-slate-400">
-            No papers found — try different keywords.
-          </p>
-        )}
-        {searchState === 'done' && papersFound.length > 0 && (
-          <ul className="animate-fade-in mt-3 space-y-2.5">
-            {papersFound.map((p, i) => (
-              <li
-                key={i}
-                className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-3"
-              >
-                <a
-                  href={p.link || undefined}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="line-clamp-2 text-[12.5px] font-semibold leading-snug text-brand-blue hover:underline"
-                >
-                  {p.title}
-                </a>
-                {p.authors && (
-                  <p className="mt-1 line-clamp-1 text-[10.5px] text-slate-400">{p.authors}</p>
-                )}
-                {p.snippet && (
-                  <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-slate-300">
-                    {p.snippet}
-                  </p>
-                )}
-                <div className="mt-2 flex flex-wrap items-center gap-2 text-[10.5px]">
-                  {p.cited_by > 0 && (
-                    <span className="rounded-md bg-white/[0.06] px-1.5 py-0.5 font-medium text-slate-300">
-                      Cited by {p.cited_by}
-                    </span>
-                  )}
-                  {p.year && (
-                    <span className="rounded-md bg-white/[0.06] px-1.5 py-0.5 font-medium text-slate-300">
-                      {p.year}
-                    </span>
-                  )}
-                  {p.link && (
-                    <a
-                      href={p.link}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="font-medium text-brand-cyan hover:underline"
-                    >
-                      Open ↗
-                    </a>
-                  )}
-                  {p.pdf && (
-                    <a
-                      href={p.pdf}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="font-medium text-brand-cyan hover:underline"
-                    >
-                      PDF ↗
-                    </a>
-                  )}
-                  <button
-                    onClick={() => {
-                      setStyle('APA');
-                      setCiteText('');
-                      setCiteUrl(p.link || '');
-                      setCiteConcept('');
-                      handleCiteFor(p.link, p.title);
-                    }}
-                    className="font-medium text-brand-violet hover:underline"
-                  >
-                    Cite
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
       {/* ---- Term explainer ---- */}
       <div className="glass p-4">
         <div className="mb-2.5 flex items-start justify-between">
@@ -462,19 +305,19 @@ export default function ResearchTab() {
               </div>
             )}
 
-            <div className="mb-2.5 flex gap-1.5" role="radiogroup" aria-label="Citation style">
+            {/* 15 styles — a select keeps this compact on every screen size */}
+            <select
+              value={style}
+              onChange={(e) => setStyle(e.target.value)}
+              aria-label="Citation style"
+              className="input-dark mb-2.5 cursor-pointer appearance-none bg-ink-800"
+            >
               {CITE_STYLES.map((s) => (
-                <button
-                  key={s}
-                  role="radio"
-                  aria-checked={style === s}
-                  onClick={() => setStyle(s)}
-                  className={`chip ${style === s ? 'chip-active' : ''}`}
-                >
+                <option key={s} value={s} className="bg-ink-800">
                   {s}
-                </button>
+                </option>
               ))}
-            </div>
+            </select>
 
             {/* cite a specific quote/concept from the source */}
             <input
