@@ -22,6 +22,7 @@ export default function HomeTab() {
   const [length, setLength] = useState('medium');
   const [state, setState] = useState('idle'); // idle | loading | done | error
   const [errorKind, setErrorKind] = useState('server');
+  const [limitMessage, setLimitMessage] = useState('');
   const [result, setResult] = useState(null);
   const [copied, setCopied] = useState(false);
 
@@ -86,7 +87,13 @@ export default function HomeTab() {
       }
       setResult({ ...res, pageTitle: source.title || res.title, url: source.url });
       setState('done');
-    } catch {
+    } catch (err) {
+      // A daily-limit response is not an outage — show the upgrade prompt.
+      if (err?.isLimit) {
+        setLimitMessage(err.message);
+        setState('limited');
+        return;
+      }
       setErrorKind('server');
       setState('error');
     }
@@ -374,6 +381,12 @@ export default function HomeTab() {
 
       {state === 'error' && (
         <ErrorCard kind={errorKind} onRetry={doc ? summarizeDoc : summarizePage} />
+      )}
+
+      {state === 'limited' && (
+        <div className="glass animate-slide-up p-4">
+          <LimitBanner message={limitMessage} />
+        </div>
       )}
 
       {state === 'done' && result && (

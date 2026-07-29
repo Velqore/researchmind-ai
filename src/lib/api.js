@@ -54,8 +54,13 @@ async function post(path, body, licenseKey) {
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `Request failed (${res.status})`);
+    const body = await res.json().catch(() => ({}));
+    const err = new Error(body.detail || `Request failed (${res.status})`);
+    // Callers need to tell a rate limit (429) apart from a real outage so they
+    // can show the upgrade prompt instead of "couldn't reach the server".
+    err.status = res.status;
+    err.isLimit = res.status === 429;
+    throw err;
   }
   return res.json();
 }

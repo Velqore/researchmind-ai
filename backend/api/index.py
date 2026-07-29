@@ -159,10 +159,12 @@ def clamp_for_llm(text: str, cap: int = HARD_MAX_INPUT_CHARS) -> str:
     tail = cap - head - 40
     return text[:head] + "\n\n[… middle omitted for length …]\n\n" + text[-tail:]
 
-# Server-side free-tier limits (per hashed IP per UTC day) — a backstop for
-# the client-side chrome.storage limits, so a modified client can't bypass them.
-# paper_search is free but capped to protect the shared SerpAPI quota.
-FREE_DAILY_LIMITS = {"summarize": 3, "explain": 5, "cite": 2, "paper_search": 8}
+# Server-side free-tier limits (per hashed IP per UTC day). These are an
+# ABUSE BACKSTOP, not the user-facing limit — the per-device client limits in
+# src/config.js are what a normal user sees. They must stay generous because
+# mobile carriers (especially in India) put thousands of subscribers behind a
+# single CGNAT address, so a tight per-IP cap would lock out innocent users.
+FREE_DAILY_LIMITS = {"summarize": 60, "explain": 80, "cite": 50, "paper_search": 40}
 
 
 def require_env(*pairs: tuple[str, str]) -> None:
