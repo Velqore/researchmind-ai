@@ -1399,6 +1399,36 @@ async def rewriteai_humanize(text: str) -> str | None:
     return None
 
 
+# Second-pass humanizer used on EVERY writer tool so paraphrased and
+# grammar-corrected output doesn't read as machine-written. Unlike the primary
+# humanize prompt, this one is explicit about preserving correctness, because
+# it runs after the grammar pass.
+HUMANIZE_PASS = (
+    "Rewrite the text so it reads as natural human writing while keeping the "
+    "meaning, facts, and correctness exactly intact.\n"
+    "• Vary sentence length sharply — mix short punchy sentences with longer ones.\n"
+    "• Use contractions and specific, natural word choices.\n"
+    "• Vary how sentences begin; never repeat the same opener.\n"
+    "• Remove AI tells: 'Moreover', 'Furthermore', 'Additionally', 'In conclusion', "
+    "'It is important to note', 'plays a crucial role', 'delve', 'realm', 'tapestry', "
+    "and symmetrical 'not only… but also' scaffolding.\n"
+    "• Grammar, spelling and punctuation must remain flawless — do not introduce errors.\n"
+    "Return ONLY the rewritten text."
+)
+
+
+async def humanize_text(text: str) -> str:
+    """Run text through the humanizer: RewriteAI when configured, otherwise our
+    own high-variance pass. Falls back to the input if everything fails."""
+    out = await rewriteai_humanize(clamp_for_llm(text, 20_000))
+    if out:
+        return out
+    try:
+        return await llm_chat(HUMANIZE_PASS, text, max_tokens=2000, temperature=1.0)
+    except Exception:
+        return text
+
+
 def writer_endpoint(mode: str):
     async def handler(body: TextRequest, request: Request):
         text = body.text.strip()
@@ -1406,16 +1436,15 @@ def writer_endpoint(mode: str):
             raise HTTPException(400, "Please provide at least a sentence of text.")
         await enforce_tier(request, mode, pro_only=True)
 
-        # Humanizer: try the dedicated service first, fall back to our own.
         if mode == "humanize":
-            out = await rewriteai_humanize(clamp_for_llm(text, 20_000))
-            if out:
-                return {"result": out, "engine": "rewriteai"}
+            return {"result": await humanize_text(text)}
 
+        # Paraphrase / grammar polish: do the job, then humanize the output so
+        # the result never reads as machine-written.
         result = await llm_chat(
             WRITER_TOOLS[mode], text, max_tokens=2000, temperature=WRITER_TEMP[mode]
         )
-        return {"result": result}
+        return {"result": await humanize_text(result)}
 
     return handler
 
