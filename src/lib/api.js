@@ -45,14 +45,31 @@ export async function getSelection() {
 }
 
 async function post(path, body, licenseKey) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(licenseKey ? { 'X-License-Key': licenseKey } : {}),
-    },
-    body: JSON.stringify(body),
-  });
+  // Long fetches (large PDFs) can outlive the serverless budget. Abort with a
+  // clear message rather than leaving the user on an endless spinner.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 95_000);
+  let res;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(licenseKey ? { 'X-License-Key': licenseKey } : {}),
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      throw new Error(
+        'That source took too long to process. Try a smaller document, or upload the file directly.',
+      );
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     const err = new Error(body.detail || `Request failed (${res.status})`);

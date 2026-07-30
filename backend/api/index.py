@@ -1087,7 +1087,9 @@ def extract_pdf_text(data: bytes, url: str) -> tuple[str, str]:
 
         reader = PdfReader(BytesIO(data))
         pages = []
-        for page in reader.pages[:60]:  # cap: enough for a long paper
+        # 30 pages is plenty for a paper and keeps us well inside the serverless
+        # time limit — bigger books should be uploaded instead of fetched.
+        for page in reader.pages[:30]:
             try:
                 pages.append(page.extract_text() or "")
             except Exception:
@@ -1137,7 +1139,9 @@ async def fetch_page_text(url: str) -> tuple[str, str]:
         ) as client:
             r = await client.get(url)
             r.raise_for_status()
-            raw = r.content[:12_000_000]
+            # Cap the download: huge files blow the serverless time budget and
+            # surface to users as a confusing "couldn't reach the server".
+            raw = r.content[:8_000_000]
             ctype = (r.headers.get("content-type") or "").lower()
     except HTTPException:
         raise
@@ -1163,6 +1167,15 @@ async def fetch_page_text(url: str) -> tuple[str, str]:
     text = re.sub(r"[ \t\r\f]+", " ", text)
     text = re.sub(r"\n\s*\n+", "\n\n", text).strip()
     title = re.sub(r"\s+", " ", title_m.group(1)).strip() if title_m else url
+    # Publisher/paywall/preview pages (Google Books, ScienceDirect, etc.) return
+    # a shell with almost no article text. Say so instead of letting the model
+    # guess from the title.
+    if len(text) < 400:
+        raise HTTPException(
+            400,
+            "This page doesn't expose the full text (it may be paywalled or a "
+            "preview). Try a direct PDF link, or download the file and upload it.",
+        )
     return title, text[:HARD_MAX_INPUT_CHARS]
 
 

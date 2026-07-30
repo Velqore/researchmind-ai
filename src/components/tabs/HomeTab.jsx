@@ -23,6 +23,7 @@ export default function HomeTab() {
   const [state, setState] = useState('idle'); // idle | loading | done | error
   const [errorKind, setErrorKind] = useState('server');
   const [limitMessage, setLimitMessage] = useState('');
+  const [sourceError, setSourceError] = useState('');
   const [result, setResult] = useState(null);
   const [copied, setCopied] = useState(false);
 
@@ -94,6 +95,9 @@ export default function HomeTab() {
         setState('limited');
         return;
       }
+      // A 4xx carries a real explanation (paywalled page, scanned PDF, too big) —
+      // show it instead of the generic outage card.
+      setSourceError(err?.status >= 400 && err?.status < 500 ? err.message : '');
       setErrorKind('server');
       setState('error');
     }
@@ -380,7 +384,11 @@ export default function HomeTab() {
       {state === 'loading' && <SkeletonCard />}
 
       {state === 'error' && (
-        <ErrorCard kind={errorKind} onRetry={doc ? summarizeDoc : summarizePage} />
+        <ErrorCard
+          kind={errorKind}
+          message={sourceError}
+          onRetry={doc ? summarizeDoc : summarizePage}
+        />
       )}
 
       {state === 'limited' && (
