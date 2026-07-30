@@ -106,6 +106,11 @@ HF_CHAT_URL = "https://router.huggingface.co/v1/chat/completions"
 # SerpAPI — real Google Scholar search for the paper-discovery feature.
 SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
 
+# RewriteAI — dedicated humanizer. Used first for /humanize when configured;
+# the in-house Groq humanizer stays as an automatic fallback.
+REWRITEAI_KEY = os.environ.get("REWRITEAI_KEY", "")
+REWRITEAI_URL = os.environ.get("REWRITEAI_URL", "https://rewriteai.com/api/v1/humanize")
+
 # Citation styles the generator accepts. Kept in sync with CITE_STYLES in
 # src/components/tabs/ResearchTab.jsx.
 CITATION_STYLES = (
@@ -611,11 +616,20 @@ async def diag(key: str = ""):
             rzp["order_test"] = "ok" if r.status_code < 400 else f"HTTP {r.status_code}: {r.text[:120]}"
         except Exception as e:
             rzp["order_test"] = type(e).__name__
+    # RewriteAI humanizer health
+    rw = {"key_set": bool(REWRITEAI_KEY), "url": REWRITEAI_URL}
+    if REWRITEAI_KEY:
+        out = await rewriteai_humanize(
+            "The utilization of said methodologies facilitates the optimization of outcomes."
+        )
+        rw["ok"] = bool(out)
+        rw["sample"] = (out or "")[:80]
     return {
         "providers_configured": [p[0] for p in ai_providers()],
         "supabase": bool(SUPABASE_URL),
         "admin_key_set": bool(ADMIN_KEY),
         "razorpay": rzp,
+        "rewriteai": rw,
         "results": results,
     }
 
@@ -1348,12 +1362,56 @@ WRITER_TOOLS = {
 WRITER_TEMP = {"humanize": 1.0, "paraphrase": 0.8, "polish": 0.15}
 
 
+async def rewriteai_humanize(text: str) -> str | None:
+    """Humanize via RewriteAI. Returns None on any failure so the caller can
+    fall back to the in-house humanizer rather than surfacing an error."""
+    if not REWRITEAI_KEY:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            r = await client.post(
+                REWRITEAI_URL,
+                headers={
+                    "Authorization": f"Bearer {REWRITEAI_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={"text": text},
+            )
+            r.raise_for_status()
+            data = r.json()
+    except Exception:
+        return None
+    # Response field names aren't guaranteed — accept the common shapes.
+    if isinstance(data, str):
+        return data.strip() or None
+    for key in ("humanized_text", "humanized", "result", "output", "text", "content"):
+        val = data.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    inner = data.get("data")
+    if isinstance(inner, dict):
+        for key in ("humanized_text", "humanized", "result", "output", "text"):
+            val = inner.get(key)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+    elif isinstance(inner, str) and inner.strip():
+        return inner.strip()
+    return None
+
+
 def writer_endpoint(mode: str):
     async def handler(body: TextRequest, request: Request):
         text = body.text.strip()
         if len(text) < 20:
             raise HTTPException(400, "Please provide at least a sentence of text.")
         await enforce_tier(request, mode, pro_only=True)
+
+        # Humanizer: try the dedicated service first, fall back to our own.
+        if mode == "humanize":
+            out = await rewriteai_humanize(clamp_for_llm(text, 20_000))
+            if out:
+                return {"result": out, "engine": "rewriteai"}
+
         result = await llm_chat(
             WRITER_TOOLS[mode], text, max_tokens=2000, temperature=WRITER_TEMP[mode]
         )
