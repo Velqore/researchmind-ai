@@ -21,17 +21,19 @@ const TABS = {
 function Shell() {
   const [tab, setTab] = useState('home');
   const { upgradeOpen, closeUpgrade } = useApp();
-  const Active = TABS[tab];
 
   return (
     <div className="app-bg flex h-full flex-col">
       <StarField />
       <Header onOpenSettings={() => setTab('settings')} />
       <main className="flex-1 overflow-y-auto px-4 pb-2 pt-1">
-        {/* key remounts the tab so its entrance animation replays */}
-        <div key={tab} className="animate-slide-up">
-          <Active />
-        </div>
+        {/* Every tab stays mounted and inactive ones are hidden, so search
+            results, summaries and writer output survive tab switches. */}
+        {Object.entries(TABS).map(([id, Tab]) => (
+          <div key={id} className={id === tab ? 'animate-slide-up' : 'hidden'}>
+            <Tab />
+          </div>
+        ))}
       </main>
       <TabBar active={tab} onChange={setTab} />
       {upgradeOpen && <UpgradeModal onClose={closeUpgrade} />}
