@@ -789,6 +789,12 @@ async def pay():
     cursor:pointer;color:#1c1204;background:linear-gradient(120deg,#f4d99a,#e3bd76,#c69a4c);
     box-shadow:0 10px 30px rgba(227,189,118,.4)}}
   button:disabled{{opacity:.6;cursor:default}}
+  .or{{display:flex;align-items:center;gap:10px;margin:14px 0;color:#64748b;font-size:11px}}
+  .or::before,.or::after{{content:"";flex:1;height:1px;background:rgba(255,255,255,.12)}}
+  .alt{{display:block;width:100%;box-sizing:border-box;padding:13px;border-radius:14px;
+    font-size:14px;font-weight:600;text-decoration:none;color:#dbe4f5;
+    background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.16)}}
+  .alt:hover{{background:rgba(255,255,255,.09)}}
   .note{{font-size:11px;color:#64748b;margin-top:16px;line-height:1.5}}
   .ok,.err{{display:none;margin-top:14px;padding:14px;border-radius:12px;font-size:13px;line-height:1.6;text-align:left}}
   .ok{{background:rgba(52,211,153,.12);border:1px solid rgba(52,211,153,.3);color:#a7f3d0}}
@@ -802,12 +808,13 @@ async def pay():
   <div id="form">
     <input id="email" type="email" placeholder="Your email (your key is sent here)" autocomplete="email">
     <button id="payBtn" onclick="pay()">Pay ₹{rupees} with UPI / Card</button>
+    <div class="or"><span>or</span></div>
+    <a class="alt" href="/checkout">🌍 &nbsp;Pay with PayPal (international)</a>
   </div>
   <div id="ok" class="ok">✅ Payment successful! Your license key has been emailed to you —
     check your inbox (and spam) in a minute, then paste it into ResearchMind → Settings.</div>
   <div id="err" class="err"></div>
-  <p class="note">Secure payment via Razorpay · License key sent by email<br>
-    <a href="/checkout">Outside India? Pay with PayPal →</a></p>
+  <p class="note">Secure payment · License key sent by email · No auto-renew</p>
 </div>
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <script>
@@ -893,7 +900,8 @@ async def checkout():
   <div id="err" style="display:none;margin-top:14px;padding:14px;border-radius:12px;
     background:rgba(244,63,94,.12);border:1px solid rgba(244,63,94,.3);
     color:#fecaca;font-size:12px;line-height:1.55;text-align:left;word-break:break-word"></div>
-  <p class="note">Secure payment via PayPal · Cancel anytime · License key sent by email</p>
+  <p class="note">Secure payment via PayPal · Cancel anytime · License key sent by email<br>
+    <a href="/pay" style="color:#94a3b8">← In India? Pay ₹140 with UPI / GPay</a></p>
 </div>
 <script src="https://www.paypal.com/sdk/js?client-id={PAYPAL_CLIENT_ID}&vault=true&intent=subscription&currency=USD"
         data-page-type="checkout"

@@ -9,6 +9,7 @@ const VERSION = isExtension ? chrome.runtime.getManifest().version : 'dev';
 export default function SettingsTab() {
   const { isPro, license, refresh, openUpgrade } = useApp();
   const [keyInput, setKeyInput] = useState('');
+  const [manageOpen, setManageOpen] = useState(false);
   const [state, setState] = useState('idle'); // idle | validating | success | error
   const [error, setError] = useState('');
   const [justUnlocked, setJustUnlocked] = useState(false);
@@ -164,14 +165,13 @@ export default function SettingsTab() {
           </div>
         </div>
         <div className="mt-3 flex gap-2">
-          <a
-            href="https://www.paypal.com/myaccount/autopay/"
-            target="_blank"
-            rel="noreferrer"
+          <button
+            onClick={() => setManageOpen((v) => !v)}
             className="btn-ghost flex-1 text-center text-[11.5px]"
+            aria-expanded={manageOpen}
           >
-            Manage subscription
-          </a>
+            Manage plan
+          </button>
           <a
             href="mailto:researchmindai@gmail.com?subject=ResearchMind%20Support"
             className="btn-ghost flex-1 text-center text-[11.5px]"
@@ -179,6 +179,49 @@ export default function SettingsTab() {
             Support
           </a>
         </div>
+
+        {/* Plans are bought two ways — UPI is a one-off, PayPal auto-renews —
+            so managing them is different. Explain both instead of assuming. */}
+        {manageOpen && (
+          <div className="animate-fade-in mt-3 space-y-3 rounded-xl border border-white/[0.08] bg-white/[0.03] p-3">
+            <div>
+              <p className="text-[11.5px] font-semibold text-slate-200">
+                🇮🇳 Paid with UPI / GPay / card (Razorpay)
+              </p>
+              <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                It’s a one-time payment — there’s nothing to cancel and you won’t be
+                charged again. Pro simply ends on your expiry date. To continue after
+                that, just buy again.
+              </p>
+            </div>
+            <div className="border-t border-white/[0.07] pt-3">
+              <p className="text-[11.5px] font-semibold text-slate-200">
+                🌍 Paid with PayPal (subscription)
+              </p>
+              <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                This renews automatically. Cancel anytime from your PayPal account.
+              </p>
+              <a
+                href="https://www.paypal.com/myaccount/autopay/"
+                target="_blank"
+                rel="noreferrer"
+                className="chip mt-2 inline-block"
+              >
+                Open PayPal subscriptions ↗
+              </a>
+            </div>
+            <p className="border-t border-white/[0.07] pt-3 text-[11px] text-slate-400">
+              Lost your key or need a refund?{' '}
+              <a
+                href="mailto:researchmindai@gmail.com?subject=ResearchMind%20Support"
+                className="font-medium text-brand-cyan hover:underline"
+              >
+                Email support
+              </a>
+              .
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );
