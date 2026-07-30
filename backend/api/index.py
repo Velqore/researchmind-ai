@@ -1417,16 +1417,45 @@ HUMANIZE_PASS = (
 )
 
 
-async def humanize_text(text: str) -> str:
-    """Run text through the humanizer: RewriteAI when configured, otherwise our
-    own high-variance pass. Falls back to the input if everything fails."""
-    out = await rewriteai_humanize(clamp_for_llm(text, 20_000))
-    if out:
-        return out
+# Conservative variant for grammar polish: the text is already correct and the
+# user only asked for fixes, so this must not expand, add ideas, or re-explain.
+HUMANIZE_LIGHT = (
+    "Lightly adjust the phrasing of the text so it reads as natural human writing. "
+    "Strict rules:\n"
+    "• Do NOT add, remove, or explain any content. Keep the same sentences and "
+    "roughly the same length — this is a phrasing touch-up, not a rewrite.\n"
+    "• Vary sentence rhythm and use contractions where natural.\n"
+    "• Avoid AI tells ('Moreover', 'Furthermore', 'In conclusion', 'delve').\n"
+    "• Grammar, spelling and punctuation must remain flawless — never introduce "
+    "an error. If a sentence is already natural and correct, leave it unchanged.\n"
+    "Return ONLY the resulting text."
+)
+
+
+async def humanize_text(text: str, light: bool = False) -> str:
+    """Run text through the humanizer. `light` keeps length/content intact (used
+    after grammar polish). Falls back to the input if anything fails, and rejects
+    a pass that balloons the text or is suspiciously short."""
+    if not light:
+        out = await rewriteai_humanize(clamp_for_llm(text, 20_000))
+        if out:
+            return out
     try:
-        return await llm_chat(HUMANIZE_PASS, text, max_tokens=2000, temperature=1.0)
+        result = await llm_chat(
+            HUMANIZE_LIGHT if light else HUMANIZE_PASS,
+            text,
+            max_tokens=2000,
+            temperature=0.6 if light else 1.0,
+        )
     except Exception:
         return text
+    if not result:
+        return text
+    # Guard against the pass rewriting/expanding beyond its brief.
+    ratio = len(result) / max(len(text), 1)
+    if light and (ratio > 1.5 or ratio < 0.6):
+        return text
+    return result
 
 
 def writer_endpoint(mode: str):
@@ -1440,11 +1469,12 @@ def writer_endpoint(mode: str):
             return {"result": await humanize_text(text)}
 
         # Paraphrase / grammar polish: do the job, then humanize the output so
-        # the result never reads as machine-written.
+        # the result never reads as machine-written. Grammar uses the light pass
+        # so corrections aren't expanded into a rewrite.
         result = await llm_chat(
             WRITER_TOOLS[mode], text, max_tokens=2000, temperature=WRITER_TEMP[mode]
         )
-        return {"result": await humanize_text(result)}
+        return {"result": await humanize_text(result, light=(mode == "polish"))}
 
     return handler
 
