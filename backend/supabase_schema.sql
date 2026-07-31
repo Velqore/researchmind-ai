@@ -30,6 +30,9 @@ create table if not exists usage_logs (
 );
 create index if not exists idx_usage_logs_key     on usage_logs (key_hash);
 create index if not exists idx_usage_logs_created on usage_logs (created_at);
+-- Composite index for the per-request rate-limit count (ip + feature + day).
+-- Without this, enforce_tier() scans a growing table on EVERY free AI request.
+create index if not exists idx_usage_logs_ip_feat_time on usage_logs (ip_hash, feature, created_at);
 
 -- ─── Response cache (same paper → cached summary for 24h) ──────────────────
 create table if not exists cached_summaries (
@@ -72,4 +75,12 @@ select cron.schedule(
   'purge-expired-summaries',
   '15 * * * *',
   $$ delete from cached_summaries where expires_at < now() $$
+);
+
+-- Daily: usage_logs grows one row per request and is otherwise unbounded. Keep
+-- 14 days (the daily-limit window only needs "today") so it can't fill storage.
+select cron.schedule(
+  'purge-old-usage-logs',
+  '30 3 * * *',
+  $$ delete from usage_logs where created_at < now() - interval '14 days' $$
 );

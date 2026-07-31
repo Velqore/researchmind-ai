@@ -328,13 +328,16 @@ async def enforce_tier(request: Request, feature: str, pro_only: bool = False) -
         async with httpx.AsyncClient(timeout=8) as client:
             if not pro and feature in FREE_DAILY_LIMITS:
                 today = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00")
+                limit = FREE_DAILY_LIMITS[feature]
+                # Only need to know whether the count has reached the limit — cap
+                # the rows returned so this stays cheap no matter how busy the IP.
                 rows = await sb_select(
                     client,
                     "usage_logs",
                     f"ip_hash=eq.{ip}&feature=eq.{feature}"
-                    f"&created_at=gte.{today}&select=id",
+                    f"&created_at=gte.{today}&select=id&limit={limit}",
                 )
-                if len(rows) >= FREE_DAILY_LIMITS[feature]:
+                if len(rows) >= limit:
                     raise HTTPException(
                         429,
                         "You've used all your free requests today. "
