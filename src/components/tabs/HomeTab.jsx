@@ -90,9 +90,7 @@ export default function HomeTab() {
       setResult({ ...res, pageTitle, url: source.url, source: srcText });
       setState('done');
       // #4 — auto-save every summary to the local library (fire and forget).
-      saveSummary({ title: pageTitle, summary: res.summary, url: source.url, length, source: srcText }).catch(
-        () => {}
-      );
+      saveSummary({ title: pageTitle, summary: res.summary, url: source.url, length }).catch(() => {});
     } catch (err) {
       // A daily-limit response is not an outage — show the upgrade prompt.
       if (err?.isLimit) {
@@ -100,9 +98,15 @@ export default function HomeTab() {
         setState('limited');
         return;
       }
-      // A 4xx carries a real explanation (paywalled page, scanned PDF, too big) —
-      // show it instead of the generic outage card.
-      setSourceError(err?.status >= 400 && err?.status < 500 ? err.message : '');
+      // Show the most useful message we can. A 4xx carries a real explanation
+      // (paywalled page, scanned PDF, too slow); a timeout/5xx would otherwise
+      // surface as a bare "couldn't reach the server", so give an actionable
+      // hint pointing at the upload path.
+      let msg;
+      if (err?.status >= 400 && err?.status < 500) msg = err.message;
+      else if (/too long|timed? ?out/i.test(err?.message || '')) msg = err.message;
+      else msg = 'Couldn’t reach that source in time. Try another link, or upload the PDF directly.';
+      setSourceError(msg);
       setErrorKind('server');
       setState('error');
     }

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { AppProvider, useApp } from './AppContext';
+import ErrorBoundary from './components/ErrorBoundary';
 import Header from './components/Header';
 import StarField from './components/StarField';
 import TabBar from './components/TabBar';
@@ -31,7 +32,9 @@ function Shell() {
             results, summaries and writer output survive tab switches. */}
         {Object.entries(TABS).map(([id, Tab]) => (
           <div key={id} className={id === tab ? 'animate-slide-up' : 'hidden'}>
-            <Tab />
+            <ErrorBoundary>
+              <Tab />
+            </ErrorBoundary>
           </div>
         ))}
       </main>

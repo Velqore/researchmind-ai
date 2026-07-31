@@ -20,9 +20,13 @@ export default function RichText({ text }) {
     );
   };
 
+  // Never trust the input to be a string — a stray undefined/object would
+  // otherwise throw on .split() and take the whole tab down.
+  const safe = typeof text === 'string' ? text : String(text ?? '');
+
   return (
     <div className="space-y-2 text-[12.5px] leading-relaxed text-slate-300">
-      {text.split(/\n+/).map((line, i) => {
+      {safe.split(/\n+/).map((line, i) => {
         const trimmed = line.trim();
         if (!trimmed) return null;
         // Markdown headers (# … ####) → bold heading, so any model's output reads cleanly

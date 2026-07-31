@@ -1113,9 +1113,9 @@ def extract_pdf_text(data: bytes, url: str) -> tuple[str, str]:
 
         reader = PdfReader(BytesIO(data))
         pages = []
-        # 30 pages is plenty for a paper and keeps us well inside the serverless
-        # time limit — bigger books should be uploaded instead of fetched.
-        for page in reader.pages[:30]:
+        # 20 pages covers a typical paper and keeps parse time well inside the
+        # serverless budget — bigger books should be uploaded instead of fetched.
+        for page in reader.pages[:20]:
             try:
                 pages.append(page.extract_text() or "")
             except Exception:
@@ -1157,23 +1157,40 @@ async def fetch_page_text(url: str) -> tuple[str, str]:
         or host.endswith((".local", ".internal"))
     ):
         raise HTTPException(400, "That URL can't be fetched.")
+    # Granular timeouts + a hard byte cap via streaming. Searched papers often
+    # point at slow publisher PDFs; without this, a slow fetch eats the whole
+    # serverless budget and Vercel returns a 502/504 that reaches the user as a
+    # confusing "couldn't reach the server". Failing fast with a clean 400 lets
+    # the client show an actionable message and offer the upload path instead.
+    MAX_BYTES = 6_000_000
+    timeout = httpx.Timeout(connect=8.0, read=15.0, write=8.0, pool=8.0)
     try:
         async with httpx.AsyncClient(
-            timeout=25,
+            timeout=timeout,
             follow_redirects=True,
             headers={"User-Agent": "Mozilla/5.0 (compatible; ResearchMindBot/1.0)"},
         ) as client:
-            r = await client.get(url)
-            r.raise_for_status()
-            # Cap the download: huge files blow the serverless time budget and
-            # surface to users as a confusing "couldn't reach the server".
-            raw = r.content[:8_000_000]
-            ctype = (r.headers.get("content-type") or "").lower()
+            async with client.stream("GET", url) as r:
+                r.raise_for_status()
+                ctype = (r.headers.get("content-type") or "").lower()
+                chunks, total = [], 0
+                async for chunk in r.aiter_bytes():
+                    chunks.append(chunk)
+                    total += len(chunk)
+                    if total >= MAX_BYTES:
+                        break  # stop downloading once we have enough
+                raw = b"".join(chunks)
     except HTTPException:
         raise
+    except httpx.TimeoutException:
+        raise HTTPException(
+            400,
+            "That source took too long to load. Try another link, or download the "
+            "PDF and use the upload button.",
+        )
     except Exception:
         raise HTTPException(
-            400, "Couldn't fetch that URL — check the link, or paste the text instead."
+            400, "Couldn't fetch that URL — check the link, or upload the PDF instead."
         )
 
     # PDFs are binary — extract real text instead of stripping "tags" from bytes

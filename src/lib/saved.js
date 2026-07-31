@@ -5,7 +5,7 @@
 
 import { KEYS, storageGet, storageSet } from './storage';
 
-const MAX_ITEMS = 200; // keep the store bounded
+const MAX_ITEMS = 80; // keep the store well under the mobile localStorage quota
 
 // The Library tab stays mounted (tabs don't remount), so it can't rely on a
 // mount-time read to see newly saved items. Broadcast a same-document event it
@@ -26,7 +26,7 @@ export async function getSaved() {
 /** Auto-save a summary. De-duplicates on (url + length): re-summarizing the
  *  same source at the same depth updates the existing entry instead of piling
  *  up copies. Returns the updated list. */
-export async function saveSummary({ title, summary, url = '', length = 'medium', source = '' }) {
+export async function saveSummary({ title, summary, url = '', length = 'medium' }) {
   if (!summary || summary.trim().length < 20) return await getSaved();
   const items = await getSaved();
   const dedupeKey = `${url}::${length}`;
@@ -34,15 +34,27 @@ export async function saveSummary({ title, summary, url = '', length = 'medium',
   const entry = {
     id: `sm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     title: (title || 'Summary').slice(0, 300),
-    summary: summary.slice(0, 12000),
+    summary: summary.slice(0, 8000),
     url,
     length,
-    // A slice of source text lets "chat with this paper" work when re-opened.
-    source: (source || '').slice(0, 45000),
     createdAt: new Date().toISOString(),
   };
+  // Never persist the full source text — on mobile it blew past the ~5MB
+  // localStorage quota after a few summaries and threw QuotaExceededError.
   const updated = [entry, ...without].slice(0, MAX_ITEMS);
-  await storageSet(KEYS.SAVED, updated);
+  try {
+    await storageSet(KEYS.SAVED, updated);
+  } catch {
+    // Quota still exceeded (huge existing store) — trim hard and retry once.
+    const trimmed = [entry, ...without].slice(0, 40);
+    try {
+      await storageSet(KEYS.SAVED, trimmed);
+      notifySaved();
+      return trimmed;
+    } catch {
+      return items; // give up silently; a save must never crash the app
+    }
+  }
   notifySaved();
   return updated;
 }
