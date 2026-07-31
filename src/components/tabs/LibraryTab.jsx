@@ -1,21 +1,36 @@
 import React, { useEffect, useState } from 'react';
 import { useApp } from '../../AppContext';
 import { getCurrentPage, getSelection } from '../../lib/api';
+import { downloadMarkdown, downloadWord } from '../../lib/exporters';
 import { addHighlight, getHighlights, removeHighlight } from '../../lib/highlights';
+import { getSaved, removeSaved, SAVED_EVENT } from '../../lib/saved';
 import { isWeb } from '../../lib/storage';
 import LimitBanner from '../LimitBanner';
+import RichText from '../RichText';
 import UsageBar from '../UsageBar';
 
 export default function LibraryTab() {
   const { isPro, remainingFor, useFeature } = useApp();
   const [highlights, setHighlights] = useState([]);
+  const [saved, setSaved] = useState([]);
+  const [expanded, setExpanded] = useState(null);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
   const [noteText, setNoteText] = useState(''); // web mode: paste-a-note
 
   useEffect(() => {
     getHighlights().then(setHighlights);
+    getSaved().then(setSaved);
+    // The tab stays mounted, so refresh when a summary is saved elsewhere.
+    const reload = () => getSaved().then(setSaved);
+    window.addEventListener(SAVED_EVENT, reload);
+    return () => window.removeEventListener(SAVED_EVENT, reload);
   }, []);
+
+  const removeSavedItem = async (id) => {
+    setSaved(await removeSaved(id));
+    if (expanded === id) setExpanded(null);
+  };
 
   const left = remainingFor('highlight');
   const limitHit = !isPro && left === 0;
@@ -121,9 +136,88 @@ export default function LibraryTab() {
         )}
       </div>
 
+      {/* ---- Auto-saved summaries ---- */}
+      {saved.length > 0 && (
+        <div className="glass p-4">
+          <h2 className="mb-3 text-[12px] font-semibold uppercase tracking-wider text-slate-400">
+            Saved summaries ({saved.length})
+          </h2>
+          <ul className="space-y-2.5">
+            {saved.map((s) => {
+              const open = expanded === s.id;
+              return (
+                <li
+                  key={s.id}
+                  className="animate-fade-in rounded-xl border border-white/[0.06] bg-white/[0.03] p-3"
+                >
+                  <button
+                    onClick={() => setExpanded(open ? null : s.id)}
+                    className="flex w-full items-start gap-2 text-left"
+                  >
+                    <span className="mt-[1px] shrink-0 text-[13px]">📄</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="line-clamp-2 text-[12px] font-semibold leading-snug text-slate-100">
+                        {s.title}
+                      </span>
+                      <span className="mt-0.5 block text-[10px] text-slate-500">
+                        {new Date(s.createdAt).toLocaleDateString(undefined, {
+                          day: 'numeric',
+                          month: 'short',
+                        })}{' '}
+                        · {s.length}
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-[11px] text-slate-500">{open ? '▲' : '▼'}</span>
+                  </button>
+
+                  {open && (
+                    <div className="animate-fade-in mt-2.5 border-t border-white/[0.07] pt-2.5">
+                      <RichText text={s.summary} />
+                      <div className="mt-2.5 flex flex-wrap gap-1.5">
+                        <button
+                          onClick={() =>
+                            navigator.clipboard.writeText(s.summary.replace(/\*\*/g, ''))
+                          }
+                          className="chip"
+                        >
+                          📋 Copy
+                        </button>
+                        <button
+                          onClick={() => downloadMarkdown(s.title, s.summary, s.url)}
+                          className="chip"
+                        >
+                          ⬇ .md
+                        </button>
+                        <button
+                          onClick={() => downloadWord(s.title, s.summary, s.url)}
+                          className="chip"
+                        >
+                          ⬇ Word
+                        </button>
+                        {s.url && (
+                          <a href={s.url} target="_blank" rel="noreferrer" className="chip">
+                            Source ↗
+                          </a>
+                        )}
+                        <button
+                          onClick={() => removeSavedItem(s.id)}
+                          className="chip ml-auto !text-rose-400/80 hover:!text-rose-400"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
       <div className="glass p-4">
         <h2 className="mb-3 text-[12px] font-semibold uppercase tracking-wider text-slate-400">
-          Your library {highlights.length > 0 && `(${highlights.length})`}
+          {isWeb ? 'Saved notes' : 'Highlights'} {highlights.length > 0 && `(${highlights.length})`}
         </h2>
 
         {highlights.length === 0 ? (

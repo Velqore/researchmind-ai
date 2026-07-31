@@ -28,6 +28,7 @@ export const DAILY_LIMITS = {
   explain: 5,
   cite: 2,
   highlight: 5,
+  ask: 4,
 };
 
 export const FEATURE_LABELS = {
@@ -35,6 +36,7 @@ export const FEATURE_LABELS = {
   explain: 'Term explanations',
   cite: 'Citations',
   highlight: 'Highlights saved',
+  ask: 'Paper questions',
 };
 
 export const PRO_FEATURES = [

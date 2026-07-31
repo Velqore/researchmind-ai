@@ -69,6 +69,10 @@ PAYPAL_WEBHOOK_ID = os.environ.get("PAYPAL_WEBHOOK_ID", "")
 KEY_ALPHABET = "ABCDEFGHJKMNPQRSTVWXYZ23456789"  # no 0/O/1/I lookalikes
 LICENSE_DAYS = 180  # $1.40 per 6-month subscription cycle
 
+# Public web app — used for the CTA on shared summary pages so every shared
+# link becomes a funnel back into the product.
+WEB_APP_URL = os.environ.get("WEB_APP_URL", "https://airesearch-mind.vercel.app").rstrip("/")
+
 # Public PayPal identifiers used to render the subscription button. Both are
 # publishable (safe in client HTML). The SECRET stays server-side only.
 PAYPAL_PLAN_ID = os.environ.get("PAYPAL_PLAN_ID", "P-0HL98976NA5043041NJPSYHQ")
@@ -169,7 +173,7 @@ def clamp_for_llm(text: str, cap: int = HARD_MAX_INPUT_CHARS) -> str:
 # src/config.js are what a normal user sees. They must stay generous because
 # mobile carriers (especially in India) put thousands of subscribers behind a
 # single CGNAT address, so a tight per-IP cap would lock out innocent users.
-FREE_DAILY_LIMITS = {"summarize": 60, "explain": 80, "cite": 50, "paper_search": 40}
+FREE_DAILY_LIMITS = {"summarize": 60, "explain": 80, "cite": 50, "paper_search": 40, "ask": 60}
 
 
 def require_env(*pairs: tuple[str, str]) -> None:
@@ -1240,7 +1244,14 @@ async def summarize(body: SummarizeRequest, request: Request):
         max_tokens=900,
     )
     await cache_put(body.url, length, summary)
-    return {"summary": summary, "cached": False, "title": title or body.url}
+    # Return the extracted source text so the client can power "chat with this
+    # paper" without re-fetching. Capped to keep the response reasonable.
+    return {
+        "summary": summary,
+        "cached": False,
+        "title": title or body.url,
+        "source": text[:PRO_MAX_INPUT_CHARS],
+    }
 
 
 class ExplainRequest(BaseModel):
@@ -1665,6 +1676,236 @@ async def pro_tool(body: ProToolRequest, request: Request):
     cap = PRO_MAX_INPUT_CHARS if pro else FREE_MAX_INPUT_CHARS
     result = await llm_chat(system, clamp_for_llm(text, cap), max_tokens=max_tokens)
     return {"result": result}
+
+
+# ------------------------------------------------------- chat with this paper
+
+
+class AskRequest(BaseModel):
+    question: str
+    text: str = ""  # the paper's text (client keeps it from /summarize)
+    url: str = ""  # fallback: fetch the source if text wasn't retained
+    title: str = ""
+
+
+@app.post("/ask")
+async def ask(body: AskRequest, request: Request):
+    """Answer a question grounded strictly in one document — the interactive
+    'chat with this paper' feature. Free-tier limited (not Pro-only) so it can
+    pull new users in."""
+    question = body.question.strip()
+    if len(question) < 3:
+        raise HTTPException(400, "Please ask a fuller question.")
+
+    pro = await enforce_tier(request, "ask")
+
+    text = body.text.strip()
+    # Client didn't retain the source (e.g. a cached summary) — fetch it.
+    if len(text) < 40 and body.url:
+        _, text = await fetch_page_text(body.url)
+    if len(text) < 40:
+        raise HTTPException(
+            400, "The document text isn't available — re-open the summary and try again."
+        )
+
+    cap = PRO_MAX_INPUT_CHARS if pro else FREE_MAX_INPUT_CHARS
+    answer = await llm_chat(
+        "You are ResearchMind, answering questions about ONE document for a "
+        "researcher. Use ONLY the document text provided — do not use outside "
+        "knowledge. Answer directly and concisely, quoting or paraphrasing the "
+        "relevant part. If the answer is genuinely not in the document, say "
+        "\"The document doesn't cover that\" rather than guessing. Use **bold** "
+        "and '• ' bullets when it aids clarity.",
+        f"DOCUMENT TITLE: {body.title or 'Untitled'}\n\n"
+        f"DOCUMENT TEXT:\n{clamp_for_llm(text, cap)}\n\n"
+        f"QUESTION: {question}",
+        max_tokens=700,
+    )
+    return {"answer": answer}
+
+
+# ---------------------------------------------------------- shareable summaries
+
+
+def _esc(s: str) -> str:
+    return (
+        s.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def render_summary_html(md: str) -> str:
+    """Render the small markdown subset the model emits (**bold**, headers,
+    '• ' bullets, numbered items, paragraphs) into safe HTML for the share page."""
+    def inline(t: str) -> str:
+        out, i = [], 0
+        for j, part in enumerate(re.split(r"(\*\*[^*]+\*\*)", t)):
+            if part.startswith("**") and part.endswith("**"):
+                out.append("<strong>" + _esc(part[2:-2]) + "</strong>")
+            else:
+                out.append(_esc(part))
+        return "".join(out)
+
+    blocks, bullets = [], []
+
+    def flush():
+        if bullets:
+            blocks.append("<ul>" + "".join(f"<li>{b}</li>" for b in bullets) + "</ul>")
+            bullets.clear()
+
+    for raw in md.split("\n"):
+        line = raw.strip()
+        if not line:
+            flush()
+            continue
+        h = re.match(r"^#{1,6}\s+(.*)$", line)
+        if h:
+            flush()
+            blocks.append(f"<h3>{inline(h.group(1).replace('**', ''))}</h3>")
+        elif re.match(r"^[•\-–*]\s", line):
+            bullets.append(inline(re.sub(r"^[•\-–*]\s*", "", line)))
+        elif re.match(r"^\d+\.\s", line):
+            bullets.append(inline(re.sub(r"^\d+\.\s*", "", line)))
+        else:
+            flush()
+            blocks.append(f"<p>{inline(line)}</p>")
+    flush()
+    return "".join(blocks)
+
+
+class ShareRequest(BaseModel):
+    title: str = ""
+    summary: str
+    url: str = ""
+
+
+@app.post("/share")
+async def share_create(body: ShareRequest, request: Request):
+    """Persist a summary and return a public shareable URL. Every shared link
+    carries a 'Try ResearchMind free' CTA — the core growth loop."""
+    summary = body.summary.strip()
+    if len(summary) < 30:
+        raise HTTPException(400, "Nothing to share yet — generate a summary first.")
+    if not SUPABASE_URL:
+        raise HTTPException(503, "Sharing isn't configured yet. Please try again later.")
+
+    sid = "".join(secrets.choice(KEY_ALPHABET) for _ in range(8)).lower()
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            await sb_insert(
+                client,
+                "shared_summaries",
+                {
+                    "id": sid,
+                    "title": body.title.strip()[:300] or "Shared summary",
+                    "summary": summary[:8000],
+                    "source_url": body.url.strip()[:1000],
+                },
+            )
+    except Exception:
+        raise HTTPException(
+            500, "Couldn't create the share link. Please try again in a moment."
+        )
+    return {"id": sid, "share_url": f"{PUBLIC_BASE(request)}/s/{sid}"}
+
+
+def PUBLIC_BASE(request: Request) -> str:
+    """Absolute origin of this backend, honouring the proxy host on Vercel."""
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host", "")
+    proto = request.headers.get("x-forwarded-proto", "https")
+    return f"{proto}://{host}" if host else API_ORIGIN_FALLBACK
+
+
+API_ORIGIN_FALLBACK = os.environ.get("API_BASE_URL", "https://airesearchmind.vercel.app").rstrip("/")
+
+
+@app.get("/s/{sid}", response_class=HTMLResponse)
+async def share_view(sid: str):
+    sid = re.sub(r"[^a-z0-9]", "", sid.lower())[:16]
+    row = None
+    if SUPABASE_URL and sid:
+        try:
+            async with httpx.AsyncClient(timeout=8) as client:
+                rows = await sb_select(
+                    client,
+                    "shared_summaries",
+                    f"id=eq.{sid}&select=title,summary,source_url&limit=1",
+                )
+            row = rows[0] if rows else None
+        except Exception:
+            row = None
+
+    if not row:
+        body_html = (
+            "<div class='card'><h1>Summary not found</h1>"
+            "<p>This shared link may have expired or is incorrect.</p>"
+            f"<a class='cta' href='{WEB_APP_URL}'>Try ResearchMind AI free →</a></div>"
+        )
+        return HTMLResponse(SHARE_SHELL.format(title="ResearchMind AI", body=body_html), status_code=404)
+
+    src = row.get("source_url") or ""
+    src_line = (
+        f"<a class='src' href='{_esc(src)}' target='_blank' rel='noreferrer noopener'>View original source ↗</a>"
+        if src.startswith("http")
+        else ""
+    )
+    body_html = (
+        "<div class='card'>"
+        "<div class='brand'>📚 ResearchMind AI</div>"
+        f"<h1>{_esc(row.get('title') or 'Shared summary')}</h1>"
+        f"<div class='summary'>{render_summary_html(row.get('summary') or '')}</div>"
+        f"{src_line}"
+        "</div>"
+        "<div class='promo'>"
+        "<p><strong>Summarized in seconds with ResearchMind AI</strong></p>"
+        "<p>Search papers, summarize any PDF or link, get citations in 15 styles — free to start.</p>"
+        f"<a class='cta' href='{WEB_APP_URL}'>Try ResearchMind AI free →</a>"
+        "</div>"
+    )
+    return HTMLResponse(
+        SHARE_SHELL.format(title=_esc(row.get("title") or "Shared summary") + " · ResearchMind AI", body=body_html)
+    )
+
+
+SHARE_SHELL = """<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title>
+<style>
+  :root{{ color-scheme:dark; }}
+  *{{ box-sizing:border-box; }}
+  body{{ margin:0; font-family:'Inter',system-ui,-apple-system,sans-serif; line-height:1.65;
+    color:#e7e3f5; background:
+      radial-gradient(70% 50% at 50% -10%, rgba(139,92,246,.16), transparent 60%),
+      radial-gradient(60% 45% at 90% 8%, rgba(227,189,118,.08), transparent 55%), #07050f;
+    -webkit-font-smoothing:antialiased; padding:28px 18px 60px; }}
+  .wrap{{ max-width:680px; margin:0 auto; }}
+  .card{{ background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.09);
+    border-radius:20px; padding:26px 24px; box-shadow:0 20px 60px rgba(0,0,0,.4); }}
+  .brand{{ font-size:13px; font-weight:700; letter-spacing:.02em;
+    background:linear-gradient(120deg,#f4d99a,#e3bd76 45%,#caa24f); -webkit-background-clip:text;
+    background-clip:text; color:transparent; margin-bottom:14px; }}
+  h1{{ font-family:Georgia,'Times New Roman',serif; font-size:24px; line-height:1.25;
+    letter-spacing:-.01em; margin:0 0 16px; color:#fff; }}
+  .summary h3{{ font-size:15.5px; color:#fff; margin:20px 0 6px; }}
+  .summary p{{ margin:.55em 0; color:#cfc9e6; font-size:15px; }}
+  .summary ul{{ margin:.4em 0; padding-left:0; list-style:none; }}
+  .summary li{{ position:relative; padding-left:20px; margin:.3em 0; color:#cfc9e6; font-size:15px; }}
+  .summary li::before{{ content:'•'; position:absolute; left:4px; color:#a78bfa; }}
+  .summary strong{{ color:#fff; }}
+  .src{{ display:inline-block; margin-top:18px; font-size:13px; color:#7cc7ff; text-decoration:none; }}
+  .src:hover{{ text-decoration:underline; }}
+  .promo{{ margin-top:20px; text-align:center; padding:22px; border-radius:18px;
+    background:rgba(139,92,246,.08); border:1px solid rgba(139,92,246,.2); }}
+  .promo p{{ margin:.3em 0; font-size:14px; color:#c9c2e6; }}
+  .promo p strong{{ color:#fff; font-size:15px; }}
+  .cta{{ display:inline-block; margin-top:14px; padding:13px 26px; border-radius:14px;
+    font-weight:700; font-size:15px; text-decoration:none; color:#1c1204;
+    background:linear-gradient(120deg,#f4d99a,#e3bd76 45%,#c69a4c); }}
+  .cta:hover{{ filter:brightness(1.05); }}
+  @media (max-width:520px){{ h1{{ font-size:21px; }} }}
+</style></head><body><div class="wrap">{body}</div></body></html>"""
 
 
 # ------------------------------------------------- Google Scholar paper search

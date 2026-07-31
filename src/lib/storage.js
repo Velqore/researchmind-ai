@@ -42,4 +42,5 @@ export const KEYS = {
   USAGE: 'rm_usage',
   LICENSE: 'rm_license',
   HIGHLIGHTS: 'rm_highlights',
+  SAVED: 'rm_saved_summaries',
 };

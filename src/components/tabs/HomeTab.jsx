@@ -1,7 +1,9 @@
 import React, { useRef, useState } from 'react';
 import { useApp } from '../../AppContext';
-import { getCurrentPage, searchPapers, summarize } from '../../lib/api';
+import { askPaper, getCurrentPage, searchPapers, shareSummary, summarize } from '../../lib/api';
+import { downloadMarkdown, downloadWord, exportPdf } from '../../lib/exporters';
 import { ACCEPT_ATTR, extractErrorMessage, extractFromFile } from '../../lib/extract';
+import { saveSummary } from '../../lib/saved';
 import { isWeb } from '../../lib/storage';
 import ErrorCard from '../ErrorCard';
 import LimitBanner from '../LimitBanner';
@@ -26,6 +28,17 @@ export default function HomeTab() {
   const [sourceError, setSourceError] = useState('');
   const [result, setResult] = useState(null);
   const [copied, setCopied] = useState(false);
+
+  // Chat with this paper
+  const [chat, setChat] = useState([]); // [{ role: 'user'|'ai', text }]
+  const [question, setQuestion] = useState('');
+  const [asking, setAsking] = useState(false);
+
+  // Share link
+  const [shareUrl, setShareUrl] = useState('');
+  const [sharing, setSharing] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
+  const [exportMsg, setExportMsg] = useState('');
 
   // Uploaded document (PDF / DOCX / TXT / MD), parsed client-side
   const fileInputRef = useRef(null);
@@ -71,6 +84,11 @@ export default function HomeTab() {
     }
     setState('loading');
     setResult(null);
+    // A new summary invalidates the previous chat/share context.
+    setChat([]);
+    setQuestion('');
+    setShareUrl('');
+    setExportMsg('');
     try {
       const res = await summarize({
         url: source.url,
@@ -86,8 +104,16 @@ export default function HomeTab() {
         setState('idle');
         return;
       }
-      setResult({ ...res, pageTitle: source.title || res.title, url: source.url });
+      const pageTitle = source.title || res.title;
+      // Prefer the backend-extracted text (web/link mode); fall back to the
+      // client's own text (upload / current-page mode) for chat grounding.
+      const srcText = res.source || source.text || '';
+      setResult({ ...res, pageTitle, url: source.url, source: srcText });
       setState('done');
+      // #4 — auto-save every summary to the local library (fire and forget).
+      saveSummary({ title: pageTitle, summary: res.summary, url: source.url, length, source: srcText }).catch(
+        () => {}
+      );
     } catch (err) {
       // A daily-limit response is not an outage — show the upgrade prompt.
       if (err?.isLimit) {
@@ -142,6 +168,77 @@ export default function HomeTab() {
     await navigator.clipboard.writeText(result.summary.replace(/\*\*/g, ''));
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
+  };
+
+  // #1 — chat with this paper
+  const askQuestion = async () => {
+    const q = question.trim();
+    if (q.length < 3 || asking || !result) return;
+    setQuestion('');
+    setChat((c) => [...c, { role: 'user', text: q }]);
+    setAsking(true);
+    try {
+      const res = await askPaper({
+        question: q,
+        text: result.source || '',
+        url: result.url || '',
+        title: result.pageTitle || '',
+        licenseKey: license.key,
+      });
+      const allowed = await useFeature('ask');
+      if (!allowed) {
+        // Out of free questions — drop the pending question, upgrade modal shows.
+        setChat((c) => c.slice(0, -1));
+        return;
+      }
+      setChat((c) => [...c, { role: 'ai', text: res.answer }]);
+    } catch (err) {
+      setChat((c) => [
+        ...c,
+        { role: 'ai', text: err?.isLimit ? err.message : '⚠️ ' + (err?.message || 'Something went wrong.') },
+      ]);
+    } finally {
+      setAsking(false);
+    }
+  };
+
+  // #9 — create a shareable link
+  const doShare = async () => {
+    if (!result?.summary || sharing) return;
+    if (shareUrl) {
+      await navigator.clipboard.writeText(shareUrl);
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 1500);
+      return;
+    }
+    setSharing(true);
+    try {
+      const res = await shareSummary({
+        title: result.pageTitle,
+        summary: result.summary,
+        url: result.url || '',
+        licenseKey: license.key,
+      });
+      setShareUrl(res.share_url);
+      await navigator.clipboard.writeText(res.share_url).catch(() => {});
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 1500);
+    } catch (err) {
+      setExportMsg(err?.message || 'Couldn’t create share link.');
+      setTimeout(() => setExportMsg(''), 3000);
+    } finally {
+      setSharing(false);
+    }
+  };
+
+  // #3 — exports
+  const flashExport = (msg) => {
+    setExportMsg(msg);
+    setTimeout(() => setExportMsg(''), 2500);
+  };
+  const onExportPdf = () => {
+    const ok = exportPdf(result.pageTitle, result.summary, result.url);
+    if (!ok) flashExport('Allow pop-ups to export as PDF.');
   };
 
   return (
@@ -399,15 +496,126 @@ export default function HomeTab() {
 
       {state === 'done' && result && (
         <div className="glass animate-slide-up p-4">
-          <div className="mb-2.5 flex items-start justify-between gap-2">
-            <h3 className="line-clamp-2 text-[12.5px] font-semibold leading-snug text-white">
-              {result.pageTitle || 'Summary'}
-            </h3>
-            <button onClick={copySummary} className="chip shrink-0" title="Copy summary">
-              {copied ? '✓ Copied' : 'Copy'}
+          <h3 className="mb-2.5 line-clamp-2 pr-1 text-[12.5px] font-semibold leading-snug text-white">
+            {result.pageTitle || 'Summary'}
+          </h3>
+          <RichText text={result.summary} />
+
+          {/* ---- #3 Export / #9 Share row ---- */}
+          <div className="mt-3 flex flex-wrap gap-1.5 border-t border-white/[0.07] pt-3">
+            <button onClick={copySummary} className="chip" title="Copy summary text">
+              {copied ? '✓ Copied' : '📋 Copy'}
+            </button>
+            <button
+              onClick={() => downloadMarkdown(result.pageTitle, result.summary, result.url)}
+              className="chip"
+              title="Download as Markdown (Notion-ready)"
+            >
+              ⬇ .md
+            </button>
+            <button
+              onClick={() => downloadWord(result.pageTitle, result.summary, result.url)}
+              className="chip"
+              title="Download as Word"
+            >
+              ⬇ Word
+            </button>
+            <button onClick={onExportPdf} className="chip" title="Export as PDF">
+              ⬇ PDF
+            </button>
+            <button
+              onClick={doShare}
+              disabled={sharing}
+              className="chip ml-auto !bg-brand-violet/15 !text-brand-violet disabled:opacity-60"
+              title="Create a public share link"
+            >
+              {sharing ? '…' : shareUrl ? (shareCopied ? '✓ Link copied' : '🔗 Copy link') : '🔗 Share'}
             </button>
           </div>
-          <RichText text={result.summary} />
+
+          {shareUrl && (
+            <div className="animate-fade-in mt-2 flex items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.03] px-2.5 py-1.5">
+              <input
+                readOnly
+                value={shareUrl}
+                onFocus={(e) => e.target.select()}
+                className="min-w-0 flex-1 bg-transparent text-[10.5px] text-brand-cyan outline-none"
+                aria-label="Share link"
+              />
+              <a
+                href={shareUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="shrink-0 text-[10.5px] font-medium text-slate-400 hover:text-white"
+              >
+                Open ↗
+              </a>
+            </div>
+          )}
+          {exportMsg && (
+            <p className="animate-fade-in mt-2 text-center text-[11px] text-amber-300">{exportMsg}</p>
+          )}
+
+          {/* ---- #1 Chat with this paper ---- */}
+          <div className="mt-3 border-t border-white/[0.07] pt-3">
+            <div className="mb-2 flex items-center gap-1.5">
+              <span className="text-[13px]">💬</span>
+              <span className="text-[11.5px] font-semibold text-slate-200">Ask this paper</span>
+            </div>
+
+            {chat.length > 0 && (
+              <div className="mb-2 max-h-[260px] space-y-2 overflow-y-auto pr-1">
+                {chat.map((m, i) =>
+                  m.role === 'user' ? (
+                    <div key={i} className="flex justify-end">
+                      <span className="max-w-[85%] rounded-2xl rounded-br-sm bg-brand-violet/25 px-3 py-1.5 text-[11.5px] text-slate-100">
+                        {m.text}
+                      </span>
+                    </div>
+                  ) : (
+                    <div
+                      key={i}
+                      className="rounded-2xl rounded-bl-sm border border-white/[0.06] bg-white/[0.03] px-3 py-2"
+                    >
+                      <RichText text={m.text} />
+                    </div>
+                  )
+                )}
+                {asking && (
+                  <div className="flex items-center gap-2 px-1 text-[11px] text-slate-400">
+                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-brand-violet/40 border-t-brand-violet" />
+                    Reading the paper…
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <input
+                value={question}
+                onChange={(e) => setQuestion(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && askQuestion()}
+                placeholder="e.g. What was the sample size?"
+                spellCheck={false}
+                disabled={asking}
+                className="input-dark py-2 text-[12px]"
+                aria-label="Ask a question about this paper"
+              />
+              <button
+                onClick={askQuestion}
+                disabled={asking || question.trim().length < 3}
+                className="grad shrink-0 rounded-xl px-3.5 text-[13px] font-bold text-[#1c1204] transition-all duration-150 hover:brightness-105 active:scale-95 disabled:opacity-50"
+                aria-label="Send question"
+              >
+                {asking ? '…' : '➤'}
+              </button>
+            </div>
+            {!isPro && (
+              <p className="mt-1.5 text-[10px] text-slate-500">
+                {remainingFor('ask')} free question{remainingFor('ask') === 1 ? '' : 's'} left today
+              </p>
+            )}
+          </div>
         </div>
       )}
 

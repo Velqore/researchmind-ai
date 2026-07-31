@@ -140,6 +140,25 @@ export async function searchPapers({ query, licenseKey }) {
   return post('/search-papers', { query }, licenseKey);
 }
 
+/** Chat with a paper: ask a question answered strictly from its text.
+ *  Pass the retained source text (fast) or a url fallback (backend re-fetches). */
+export async function askPaper({ question, text = '', url = '', title = '', licenseKey }) {
+  if (DEMO_MODE) {
+    await delay(1000);
+    return { answer: `(demo answer) You asked: "${question}".` };
+  }
+  return post('/ask', { question, text, url, title }, licenseKey);
+}
+
+/** Create a public shareable link for a summary. Returns { id, share_url }. */
+export async function shareSummary({ title, summary, url = '', licenseKey }) {
+  if (DEMO_MODE) {
+    await delay(700);
+    return { id: 'demo1234', share_url: 'https://airesearchmind.vercel.app/s/demo1234' };
+  }
+  return post('/share', { title, summary, url }, licenseKey);
+}
+
 export async function generateCitation({ url, title, style, text, concept, licenseKey }) {
   if (DEMO_MODE) {
     await delay(900);
