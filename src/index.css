@@ -166,6 +166,24 @@ html.narrow body {
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
+/* backdrop-blur is one of the heaviest effects on mobile GPUs — every glass
+   card re-blurs the animated background each frame. Drop the blur radius on
+   small screens (and bump the card opacity so contrast holds without it). */
+@media (max-width: 640px) {
+  .glass {
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    background-color: rgba(18, 16, 30, 0.72);
+  }
+}
+/* Coarse-pointer / touch devices: hover-lift never fires usefully and just
+   adds compositing cost during scroll. */
+@media (hover: none) {
+  .glass-hover:hover {
+    transform: none;
+  }
+}
+
 /* Light sweep across primary buttons on hover */
 .btn-primary {
   overflow: hidden;
