@@ -103,6 +103,10 @@ RAZORPAY_API = "https://api.razorpay.com/v1"
 # Hugging Face is the fallback. Set at least one key in the backend env.
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+# Free-tier users get a lighter, faster model with much higher rate/day limits
+# and ~10x lower token cost. Pro users get the premium 70B model above. This is
+# the biggest lever for serving many free users without exhausting the quota.
+GROQ_MODEL_FREE = os.environ.get("GROQ_MODEL_FREE", "llama-3.1-8b-instant")
 GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
@@ -149,13 +153,14 @@ CITATION_STYLES = (
 )
 
 
-def ai_providers() -> list[tuple[str, str, str, str]]:
+def ai_providers(pro: bool = True) -> list[tuple[str, str, str, str]]:
     """(label, url, api_key, model) in priority order. Groq primary, then HF,
     then any configured extra providers — so a rate-limited or exhausted primary
-    automatically fails over and load can be spread across accounts at scale."""
+    automatically fails over and load can be spread across accounts at scale.
+    Free-tier callers get the lighter Groq model to stretch the quota."""
     provs = []
     if GROQ_API_KEY:
-        provs.append(("groq", GROQ_CHAT_URL, GROQ_API_KEY, GROQ_MODEL))
+        provs.append(("groq", GROQ_CHAT_URL, GROQ_API_KEY, GROQ_MODEL if pro else GROQ_MODEL_FREE))
     if HF_TOKEN:
         provs.append(("hf", HF_CHAT_URL, HF_TOKEN, MODEL_ID))
     if LLM2_API_KEY and LLM2_MODEL:
@@ -292,7 +297,9 @@ def _retry_after(e: httpx.HTTPStatusError) -> float | None:
         return None
 
 
-async def llm_chat(system: str, user: str, max_tokens: int = 1200, temperature: float = 0.4) -> str:
+async def llm_chat(
+    system: str, user: str, max_tokens: int = 1200, temperature: float = 0.4, pro: bool = True
+) -> str:
     """Chat completion across all configured providers with rate-limit-aware
     retries. When more than one provider is set, requests are LOAD-BALANCED
     (random primary each call) rather than always hammering the first — so the
@@ -301,8 +308,9 @@ async def llm_chat(system: str, user: str, max_tokens: int = 1200, temperature: 
     covers for the others on failure. Transient 429/5xx are retried with
     Retry-After / exponential backoff + jitter, bounded by LLM_DEADLINE_S so a
     burst of concurrent users converts rate-limits into eventual successes
-    instead of 502s — without exceeding the serverless budget."""
-    provs = ai_providers()
+    instead of 502s — without exceeding the serverless budget.
+    `pro=False` routes to the lighter Groq model to conserve the shared quota."""
+    provs = ai_providers(pro)
     if not provs:
         raise HTTPException(500, "No AI provider configured — set GROQ_API_KEY or HF_TOKEN.")
     # Spread load: randomise order so no single free quota is the sole hot path.
@@ -1315,6 +1323,7 @@ async def summarize(body: SummarizeRequest, request: Request):
         "Use **bold** for section headers and '• ' for bullets. " + SUMMARY_STYLES[length],
         f"Title: {title}\n\nContent:\n{clamp_for_llm(text, cap)}",
         max_tokens=900,
+        pro=pro,
     )
     await cache_put(body.url, length, summary)
     # Return the extracted source text so the client can power "chat with this
@@ -1347,7 +1356,7 @@ async def explain(body: ExplainRequest, request: Request):
         if hit:
             return {"explanation": hit, "cached": True}
 
-    await enforce_tier(request, "explain")
+    pro = await enforce_tier(request, "explain")
     explanation = await llm_chat(
         "You are ResearchMind, an expert at explaining academic jargon. "
         "Explain the term in plain language a smart undergraduate would understand. "
@@ -1356,6 +1365,7 @@ async def explain(body: ExplainRequest, request: Request):
         "Under 120 words total.",
         f"Term: {term}" + (f"\n\nSurrounding context:\n{body.context[:2000]}" if body.context else ""),
         max_tokens=300,
+        pro=pro,
     )
     if not body.context.strip():
         await cache_put(cache_key, "", explanation)
@@ -1373,7 +1383,7 @@ class CiteRequest(BaseModel):
 @app.post("/cite")
 async def cite(body: CiteRequest, request: Request):
     style = body.style if body.style in CITATION_STYLES else "APA"
-    await enforce_tier(request, "cite")
+    pro = await enforce_tier(request, "cite")
     today = datetime.now(timezone.utc).strftime("%B %d, %Y")
 
     content = body.text.strip()
@@ -1407,7 +1417,7 @@ async def cite(body: CiteRequest, request: Request):
         else:
             system += " Return ONLY the reference-list entry — no preamble or notes."
         user = f"URL: {body.url or 'n/a'}\nConcept to cite: {concept or 'n/a'}\n\nSOURCE CONTENT:\n{clamp_for_llm(content, 24000)}"
-        citation = await llm_chat(system, user, max_tokens=350)
+        citation = await llm_chat(system, user, max_tokens=350, pro=pro)
     else:
         citation = await llm_chat(
             f"You generate {style}-style citations for web sources. Return ONLY the "
@@ -1415,6 +1425,7 @@ async def cite(body: CiteRequest, request: Request):
             "style's missing-information rules rather than inventing them.",
             f"Title: {title or 'Unknown'}\nURL: {body.url}\nAccessed: {today}",
             max_tokens=200,
+            pro=pro,
         )
     return {"citation": citation, "style": style}
 
@@ -1805,6 +1816,7 @@ async def ask(body: AskRequest, request: Request):
         f"DOCUMENT TEXT:\n{clamp_for_llm(text, cap)}\n\n"
         f"QUESTION: {question}",
         max_tokens=700,
+        pro=pro,
     )
     return {"answer": answer}
 
