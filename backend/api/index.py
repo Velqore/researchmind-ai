@@ -28,9 +28,11 @@ import hashlib
 import hmac
 import json
 import os
+import random
 import re
 import secrets
 import smtplib
+import time
 from urllib.parse import urlparse
 from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
@@ -273,30 +275,56 @@ async def _try_provider(client, url, key, model, system, user, max_tokens, tempe
     return r.json()["choices"][0]["message"]["content"].strip()
 
 
+# Retry budget for the whole call. Vercel's function limit is 60s, so we keep
+# the total AI wait under this and leave room for fetch/DB work in the request.
+LLM_DEADLINE_S = 42
+LLM_ATTEMPTS = 3
+
+
+def _retry_after(e: httpx.HTTPStatusError) -> float | None:
+    """Seconds to wait per the provider's Retry-After header, if present."""
+    v = e.response.headers.get("retry-after")
+    if not v:
+        return None
+    try:
+        return min(float(v), 12.0)  # cap so one slow header can't blow the budget
+    except ValueError:
+        return None
+
+
 async def llm_chat(system: str, user: str, max_tokens: int = 1200, temperature: float = 0.4) -> str:
-    """Chat completion with multi-provider fallback. Tries each configured
-    provider (Groq → HF) twice before giving up, so a single provider being
-    rate-limited, out of credits, or down never takes the feature offline."""
+    """Chat completion with multi-provider fallback and rate-limit-aware retries.
+    Transient 429/5xx are retried with Retry-After (when the provider sends it),
+    otherwise exponential backoff + jitter, all bounded by LLM_DEADLINE_S so a
+    burst of concurrent users converts provider rate-limits into eventual
+    successes instead of 502s — without ever exceeding the serverless budget."""
     provs = ai_providers()
     if not provs:
         raise HTTPException(500, "No AI provider configured — set GROQ_API_KEY or HF_TOKEN.")
     last = ""
-    async with httpx.AsyncClient(timeout=90) as client:
+    start = time.monotonic()
+    async with httpx.AsyncClient(timeout=45) as client:
         for label, url, key, model in provs:
-            for attempt in range(2):
+            for attempt in range(LLM_ATTEMPTS):
                 try:
                     return await _try_provider(
                         client, url, key, model, system, user, max_tokens, temperature
                     )
                 except httpx.HTTPStatusError as e:
                     last = f"{label} HTTP {e.response.status_code}"
-                    # 4xx (bad key, quota) won't fix on retry — move to next provider
+                    # 4xx other than 429 (bad key, quota) won't fix on retry.
                     if e.response.status_code < 500 and e.response.status_code != 429:
                         break
-                    await asyncio.sleep(0.8 * (attempt + 1))
+                    wait = _retry_after(e) or (0.6 * (2**attempt) + random.uniform(0, 0.5))
+                    if attempt == LLM_ATTEMPTS - 1 or time.monotonic() - start + wait > LLM_DEADLINE_S:
+                        break  # out of attempts or budget — fall through to next provider
+                    await asyncio.sleep(wait)
                 except Exception as e:
                     last = f"{label} {type(e).__name__}"
-                    await asyncio.sleep(0.8 * (attempt + 1))
+                    wait = 0.6 * (2**attempt) + random.uniform(0, 0.5)
+                    if attempt == LLM_ATTEMPTS - 1 or time.monotonic() - start + wait > LLM_DEADLINE_S:
+                        break
+                    await asyncio.sleep(wait)
     raise HTTPException(502, f"The AI service is temporarily unavailable ({last}). Please try again.")
 
 
