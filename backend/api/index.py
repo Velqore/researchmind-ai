@@ -349,6 +349,19 @@ async def llm_chat(
                     if attempt == LLM_ATTEMPTS - 1 or time.monotonic() - start + wait > LLM_DEADLINE_S:
                         break
                     await asyncio.sleep(wait)
+
+        # Last resort for Pro requests: the premium model and every fallback were
+        # rate-limited/unavailable. The lighter Groq model has a SEPARATE rate
+        # bucket, so degrade to it — a good answer beats a 502. (Free requests
+        # already run this model, so there's nothing lighter to fall back to.)
+        if pro and GROQ_API_KEY and GROQ_MODEL_FREE != GROQ_MODEL:
+            try:
+                return await _try_provider(
+                    client, GROQ_CHAT_URL, GROQ_API_KEY, GROQ_MODEL_FREE,
+                    system, user, max_tokens, temperature,
+                )
+            except Exception as e:  # noqa: BLE001
+                last = f"groq-lite {type(e).__name__}"
     raise HTTPException(502, f"The AI service is temporarily unavailable ({last}). Please try again.")
 
 
