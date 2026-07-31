@@ -11,6 +11,11 @@ const MESSAGES = {
     title: 'Couldn’t reach the server',
     body: 'The ResearchMind backend didn’t respond. Please try again in a moment — your daily limit wasn’t used.',
   },
+  busy: {
+    icon: '⏳',
+    title: 'High demand right now',
+    body: 'The AI is handling a lot of requests at the moment. Please try again in a few seconds — your daily limit wasn’t used.',
+  },
   page: {
     icon: '🚫',
     title: 'Can’t read this page',

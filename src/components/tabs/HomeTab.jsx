@@ -102,6 +102,13 @@ export default function HomeTab() {
       // (paywalled page, scanned PDF, too slow); a timeout/5xx would otherwise
       // surface as a bare "couldn't reach the server", so give an actionable
       // hint pointing at the upload path.
+      // 502/503 = AI provider overloaded/unavailable → "high demand" card.
+      if (err?.status === 502 || err?.status === 503) {
+        setSourceError('');
+        setErrorKind('busy');
+        setState('error');
+        return;
+      }
       let msg;
       if (err?.status >= 400 && err?.status < 500) msg = err.message;
       else if (/too long|timed? ?out/i.test(err?.message || '')) msg = err.message;
@@ -176,10 +183,12 @@ export default function HomeTab() {
       }
       setChat((c) => [...c, { role: 'ai', text: res.answer }]);
     } catch (err) {
-      setChat((c) => [
-        ...c,
-        { role: 'ai', text: err?.isLimit ? err.message : '⚠️ ' + (err?.message || 'Something went wrong.') },
-      ]);
+      let text;
+      if (err?.isLimit) text = err.message;
+      else if (err?.status === 502 || err?.status === 503)
+        text = '⏳ The AI is under heavy load right now — please try that question again in a few seconds.';
+      else text = '⚠️ ' + (err?.message || 'Something went wrong.');
+      setChat((c) => [...c, { role: 'ai', text }]);
     } finally {
       setAsking(false);
     }

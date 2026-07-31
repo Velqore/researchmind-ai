@@ -107,6 +107,17 @@ HF_TOKEN = os.environ.get("HF_TOKEN", "")
 MODEL_ID = os.environ.get("MODEL_ID", "Qwen/Qwen2.5-72B-Instruct")
 HF_CHAT_URL = "https://router.huggingface.co/v1/chat/completions"
 
+# Optional extra OpenAI-compatible providers (OpenRouter, Together, Cerebras,
+# DeepInfra, a second Groq project…) for capacity + redundancy at scale. Adding
+# one is purely an env change — no code deploy. Set LLM2_API_KEY + LLM2_MODEL
+# (and LLM2_CHAT_URL if it isn't OpenRouter). Same for LLM3_*.
+LLM2_API_KEY = os.environ.get("LLM2_API_KEY", "")
+LLM2_MODEL = os.environ.get("LLM2_MODEL", "")
+LLM2_CHAT_URL = os.environ.get("LLM2_CHAT_URL", "https://openrouter.ai/api/v1/chat/completions")
+LLM3_API_KEY = os.environ.get("LLM3_API_KEY", "")
+LLM3_MODEL = os.environ.get("LLM3_MODEL", "")
+LLM3_CHAT_URL = os.environ.get("LLM3_CHAT_URL", "https://openrouter.ai/api/v1/chat/completions")
+
 # SerpAPI — real Google Scholar search for the paper-discovery feature.
 SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
 
@@ -137,12 +148,18 @@ CITATION_STYLES = (
 
 
 def ai_providers() -> list[tuple[str, str, str, str]]:
-    """(label, url, api_key, model) in priority order — Groq first, HF fallback."""
+    """(label, url, api_key, model) in priority order. Groq primary, then HF,
+    then any configured extra providers — so a rate-limited or exhausted primary
+    automatically fails over and load can be spread across accounts at scale."""
     provs = []
     if GROQ_API_KEY:
         provs.append(("groq", GROQ_CHAT_URL, GROQ_API_KEY, GROQ_MODEL))
     if HF_TOKEN:
         provs.append(("hf", HF_CHAT_URL, HF_TOKEN, MODEL_ID))
+    if LLM2_API_KEY and LLM2_MODEL:
+        provs.append(("llm2", LLM2_CHAT_URL, LLM2_API_KEY, LLM2_MODEL))
+    if LLM3_API_KEY and LLM3_MODEL:
+        provs.append(("llm3", LLM3_CHAT_URL, LLM3_API_KEY, LLM3_MODEL))
     return provs
 
 # Hugging Face free-tier inference reliably handles ~45k chars; beyond that it
