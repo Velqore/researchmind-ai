@@ -320,7 +320,8 @@ async def llm_chat(
     last = ""
     start = time.monotonic()
     async with httpx.AsyncClient(timeout=45) as client:
-        for label, url, key, model in provs:
+        for idx, (label, url, key, model) in enumerate(provs):
+            has_alt = idx < len(provs) - 1  # another provider still to try
             for attempt in range(LLM_ATTEMPTS):
                 try:
                     return await _try_provider(
@@ -331,12 +332,19 @@ async def llm_chat(
                     # 4xx other than 429 (bad key, quota) won't fix on retry.
                     if e.response.status_code < 500 and e.response.status_code != 429:
                         break
+                    # Rate-limited/overloaded: if another provider is available,
+                    # switch to it IMMEDIATELY (a healthy provider beats waiting
+                    # on this one — and a quota-dead key won't recover at all).
+                    if has_alt:
+                        break
                     wait = _retry_after(e) or (0.6 * (2**attempt) + random.uniform(0, 0.5))
                     if attempt == LLM_ATTEMPTS - 1 or time.monotonic() - start + wait > LLM_DEADLINE_S:
-                        break  # out of attempts or budget — fall through to next provider
+                        break
                     await asyncio.sleep(wait)
                 except Exception as e:
                     last = f"{label} {type(e).__name__}"
+                    if has_alt:
+                        break  # try the next provider rather than retrying a flaky one
                     wait = 0.6 * (2**attempt) + random.uniform(0, 0.5)
                     if attempt == LLM_ATTEMPTS - 1 or time.monotonic() - start + wait > LLM_DEADLINE_S:
                         break
