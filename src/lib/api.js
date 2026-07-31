@@ -150,6 +150,19 @@ export async function askPaper({ question, text = '', url = '', title = '', lice
   return post('/ask', { question, text, url, title }, licenseKey);
 }
 
+/** Fire-and-forget visit ping so the admin dashboard can count visitors.
+ *  Once per browser session; never throws. */
+export function trackVisit() {
+  if (DEMO_MODE) return;
+  try {
+    if (sessionStorage.getItem('rm_visit_pinged')) return;
+    sessionStorage.setItem('rm_visit_pinged', '1');
+  } catch {
+    /* sessionStorage unavailable — still ping once per load */
+  }
+  fetch(`${API_BASE}/track`, { method: 'POST', keepalive: true }).catch(() => {});
+}
+
 /** Create a public shareable link for a summary. Returns { id, share_url }. */
 export async function shareSummary({ title, summary, url = '', licenseKey }) {
   if (DEMO_MODE) {

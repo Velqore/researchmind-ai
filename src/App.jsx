@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AppProvider, useApp } from './AppContext';
+import { trackVisit } from './lib/api';
 import ErrorBoundary from './components/ErrorBoundary';
 import Header from './components/Header';
 import StarField from './components/StarField';
@@ -45,6 +46,11 @@ function Shell() {
 }
 
 export default function App() {
+  // Count this visit once per session for the admin dashboard.
+  useEffect(() => {
+    trackVisit();
+  }, []);
+
   return (
     <AppProvider>
       <Shell />

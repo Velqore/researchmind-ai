@@ -723,6 +723,144 @@ async def diag(key: str = ""):
     }
 
 
+# ---------------------------------------------------------------- analytics
+
+
+@app.post("/track")
+async def track_visit(request: Request):
+    """Lightweight visit ping the web app fires once per session, so the admin
+    dashboard can show visitors (not just feature users). Fire-and-forget; never
+    errors the caller."""
+    if not SUPABASE_URL:
+        return {"ok": True}
+    try:
+        ip = hash_ip(client_ip(request))
+        async with httpx.AsyncClient(timeout=6) as client:
+            await sb_insert(client, "usage_logs", {"feature": "visit", "ip_hash": ip, "key_hash": None})
+    except Exception:
+        pass
+    return {"ok": True}
+
+
+@app.get("/admin/stats")
+async def admin_stats(key: str = ""):
+    """Admin-only usage analytics (JSON): ?key=<ADMIN_KEY>. Aggregates are
+    computed inside Postgres via the admin_stats() function."""
+    if not ADMIN_KEY or key.strip().upper() != ADMIN_KEY:
+        raise HTTPException(403, "Admin key required.")
+    if not SUPABASE_URL:
+        raise HTTPException(503, "Supabase not configured.")
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(
+                f"{SUPABASE_URL}/rest/v1/rpc/admin_stats", headers=sb_headers()
+            )
+            r.raise_for_status()
+            return r.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            500,
+            "Stats function not found. Run backend/supabase_admin_stats.sql in "
+            f"Supabase first. ({e.response.status_code})",
+        )
+    except Exception:
+        raise HTTPException(500, "Couldn't load stats. Try again.")
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_dashboard(key: str = ""):
+    """Admin analytics dashboard. Visit /admin?key=<ADMIN_KEY> in a browser."""
+    if not ADMIN_KEY or key.strip().upper() != ADMIN_KEY:
+        return HTMLResponse("<h1>403 — admin key required</h1>", status_code=403)
+    return HTMLResponse(ADMIN_DASHBOARD.replace("__KEY__", _esc(key.strip())))
+
+
+ADMIN_DASHBOARD = """<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ResearchMind — Analytics</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Inter,system-ui,-apple-system,sans-serif;color:#e7e3f5;
+    background:radial-gradient(70% 50% at 50% -10%,rgba(139,92,246,.16),transparent 60%),#07050f;
+    padding:24px 16px 60px;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:820px;margin:0 auto}
+  h1{font-size:22px;margin:0 0 2px}
+  .sub{color:#8b8ba7;font-size:13px;margin-bottom:20px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:22px}
+  .stat{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);
+    border-radius:16px;padding:16px 18px}
+  .stat .n{font-size:28px;font-weight:800;line-height:1;
+    background:linear-gradient(120deg,#f4d99a,#e3bd76 55%,#caa24f);-webkit-background-clip:text;
+    background-clip:text;color:transparent}
+  .stat .l{font-size:12px;color:#9aa0b0;margin-top:6px}
+  .stat.pro .n{background:linear-gradient(120deg,#c4b5fd,#8b5cf6);-webkit-background-clip:text;background-clip:text}
+  .panel{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);
+    border-radius:16px;padding:18px;margin-bottom:16px}
+  .panel h2{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:#9aa0b0;margin:0 0 14px}
+  .bar{display:flex;align-items:center;gap:10px;margin:7px 0;font-size:13px}
+  .bar .name{width:110px;color:#cfc9e6;text-transform:capitalize;flex-shrink:0}
+  .bar .track{flex:1;height:10px;border-radius:6px;background:rgba(255,255,255,.06);overflow:hidden}
+  .bar .fill{height:100%;border-radius:6px;background:linear-gradient(90deg,#8b5cf6,#a78bfa)}
+  .bar .v{width:52px;text-align:right;color:#e7e3f5;font-variant-numeric:tabular-nums}
+  .days{display:flex;align-items:flex-end;gap:5px;height:110px}
+  .day{flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;justify-content:flex-end}
+  .day .col{width:100%;border-radius:5px 5px 0 0;background:linear-gradient(180deg,#e3bd76,#caa24f);min-height:2px}
+  .day .dl{font-size:9px;color:#7a7a90;white-space:nowrap}
+  .muted{color:#7a7a90;font-size:12px}
+  button{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);color:#e7e3f5;
+    border-radius:10px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer}
+  button:hover{background:rgba(255,255,255,.1)}
+  .err{color:#fb7185;font-size:13px}
+</style></head><body><div class="wrap">
+  <h1>📊 ResearchMind Analytics</h1>
+  <div class="sub">Live usage from your backend · <span id="ts">loading…</span>
+    &nbsp;<button onclick="load()">Refresh</button></div>
+  <div id="body"><p class="muted">Loading…</p></div>
+</div>
+<script>
+const KEY="__KEY__";
+const cap=s=>s.replace(/_/g,' ');
+function bars(obj){
+  const e=Object.entries(obj||{}).sort((a,b)=>b[1]-a[1]);
+  if(!e.length) return '<p class="muted">No data yet.</p>';
+  const max=Math.max(...e.map(x=>x[1]));
+  return e.map(([k,v])=>`<div class="bar"><span class="name">${cap(k)}</span>
+    <span class="track"><span class="fill" style="width:${Math.max(3,100*v/max)}%"></span></span>
+    <span class="v">${v.toLocaleString()}</span></div>`).join('');
+}
+function days(obj){
+  const e=Object.entries(obj||{}).sort((a,b)=>a[0].localeCompare(b[0]));
+  if(!e.length) return '<p class="muted">No data yet.</p>';
+  const max=Math.max(...e.map(x=>x[1]),1);
+  return '<div class="days">'+e.map(([d,v])=>`<div class="day" title="${d}: ${v}">
+    <div class="col" style="height:${100*v/max}%"></div>
+    <div class="dl">${d.slice(5)}</div></div>`).join('')+'</div>';
+}
+async function load(){
+  const b=document.getElementById('body');
+  try{
+    const r=await fetch('/admin/stats?key='+encodeURIComponent(KEY));
+    if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error(j.detail||('HTTP '+r.status));}
+    const s=await r.json();
+    document.getElementById('ts').textContent=new Date(s.generated_at).toLocaleString();
+    b.innerHTML=`
+      <div class="grid">
+        <div class="stat"><div class="n">${(s.visitors_today||0).toLocaleString()}</div><div class="l">Visitors today</div></div>
+        <div class="stat"><div class="n">${(s.visitors_7d||0).toLocaleString()}</div><div class="l">Visitors (7 days)</div></div>
+        <div class="stat"><div class="n">${(s.visitors_all||0).toLocaleString()}</div><div class="l">Visitors all-time</div></div>
+        <div class="stat pro"><div class="n">${(s.pro_active||0).toLocaleString()}</div><div class="l">Active Pro users</div></div>
+        <div class="stat"><div class="n">${(s.events_today||0).toLocaleString()}</div><div class="l">Actions today</div></div>
+        <div class="stat"><div class="n">${(s.events_all||0).toLocaleString()}</div><div class="l">Actions all-time</div></div>
+      </div>
+      <div class="panel"><h2>Activity — last 14 days</h2>${days(s.daily_14d)}</div>
+      <div class="panel"><h2>Feature usage — last 7 days</h2>${bars(s.by_feature_7d)}</div>
+      <div class="panel"><h2>Feature usage — all time</h2>${bars(s.by_feature_all)}</div>`;
+  }catch(e){ b.innerHTML='<p class="err">'+e.message+'</p>'; }
+}
+load();
+</script></body></html>"""
+
+
 # ------------------------------------------------------------------ Razorpay
 
 
