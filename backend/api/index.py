@@ -1337,6 +1337,16 @@ async def explain(body: ExplainRequest, request: Request):
     term = body.term.strip()[:200]
     if not term:
         raise HTTPException(400, "No term provided.")
+
+    # Common academic terms repeat constantly across users. Cache context-free
+    # explanations so we don't spend tokens re-explaining "p-value" 500 times —
+    # this stretches the AI daily budget across many more users.
+    cache_key = "explain:" + term.lower()
+    if not body.context.strip():
+        hit = await cache_get(cache_key, "")
+        if hit:
+            return {"explanation": hit, "cached": True}
+
     await enforce_tier(request, "explain")
     explanation = await llm_chat(
         "You are ResearchMind, an expert at explaining academic jargon. "
@@ -1347,6 +1357,8 @@ async def explain(body: ExplainRequest, request: Request):
         f"Term: {term}" + (f"\n\nSurrounding context:\n{body.context[:2000]}" if body.context else ""),
         max_tokens=300,
     )
+    if not body.context.strip():
+        await cache_put(cache_key, "", explanation)
     return {"explanation": explanation}
 
 
