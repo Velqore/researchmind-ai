@@ -293,14 +293,22 @@ def _retry_after(e: httpx.HTTPStatusError) -> float | None:
 
 
 async def llm_chat(system: str, user: str, max_tokens: int = 1200, temperature: float = 0.4) -> str:
-    """Chat completion with multi-provider fallback and rate-limit-aware retries.
-    Transient 429/5xx are retried with Retry-After (when the provider sends it),
-    otherwise exponential backoff + jitter, all bounded by LLM_DEADLINE_S so a
-    burst of concurrent users converts provider rate-limits into eventual
-    successes instead of 502s — without ever exceeding the serverless budget."""
+    """Chat completion across all configured providers with rate-limit-aware
+    retries. When more than one provider is set, requests are LOAD-BALANCED
+    (random primary each call) rather than always hammering the first — so the
+    free daily quotas of several providers (Groq + Gemini + Cerebras + …) ADD UP
+    instead of one being exhausted while others sit idle. Any provider still
+    covers for the others on failure. Transient 429/5xx are retried with
+    Retry-After / exponential backoff + jitter, bounded by LLM_DEADLINE_S so a
+    burst of concurrent users converts rate-limits into eventual successes
+    instead of 502s — without exceeding the serverless budget."""
     provs = ai_providers()
     if not provs:
         raise HTTPException(500, "No AI provider configured — set GROQ_API_KEY or HF_TOKEN.")
+    # Spread load: randomise order so no single free quota is the sole hot path.
+    # With one provider this is a no-op (keeps current behaviour).
+    if len(provs) > 1:
+        random.shuffle(provs)
     last = ""
     start = time.monotonic()
     async with httpx.AsyncClient(timeout=45) as client:
