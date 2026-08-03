@@ -269,6 +269,15 @@ html.narrow body {
   .rm-spin, .rm-spin-rev, .rm-breathe, .rm-sheen, .rm-halo { animation: none; }
 }
 
+/* Mobile nav drawer slide-in */
+@keyframes drawerIn {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+.animate-drawer-in {
+  animation: drawerIn 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 /* ---- Scrollbar ---------------------------------------------------------- */
 ::-webkit-scrollbar {
   width: 6px;

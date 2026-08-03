@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useEffect } from 'react';
+import React, { lazy, Suspense, useEffect, useState } from 'react';
 import { AppProvider, useApp } from './AppContext';
 import { trackVisit } from './lib/api';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -38,16 +38,23 @@ function matchRoute(path) {
 function Shell() {
   const path = useRoute();
   const { upgradeOpen, closeUpgrade } = useApp();
+  const [menuOpen, setMenuOpen] = useState(false);
   const Page = matchRoute(path);
+
+  // Close the mobile drawer whenever the route changes.
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [path]);
 
   return (
     <div className="app-bg flex h-full">
       <StarField />
       <Nav variant="side" />
+
       <div className="flex min-w-0 flex-1 flex-col">
-        <Header />
-        <main className="flex-1 overflow-y-auto px-4 pb-2 pt-1">
-          <div className="mx-auto w-full max-w-[680px]">
+        <Header onMenu={() => setMenuOpen(true)} />
+        <main className="flex-1 overflow-y-auto px-4 pb-4 pt-1 md:px-8">
+          <div className="mx-auto w-full max-w-[720px]">
             <ErrorBoundary key={path}>
               <Suspense fallback={<div className="py-3"><SkeletonCard /></div>}>
                 <Page />
@@ -55,8 +62,21 @@ function Shell() {
             </ErrorBoundary>
           </div>
         </main>
-        <Nav variant="bottom" />
       </div>
+
+      {/* Mobile slide-in drawer (replaces the bottom bar) */}
+      {menuOpen && (
+        <div className="fixed inset-0 z-50 md:hidden" role="dialog" aria-modal="true">
+          <div
+            className="animate-fade-in absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setMenuOpen(false)}
+          />
+          <div className="animate-drawer-in absolute left-0 top-0 h-full border-r border-white/10 bg-ink-950/95 shadow-2xl backdrop-blur-xl">
+            <Nav variant="drawer" onNavigate={() => setMenuOpen(false)} />
+          </div>
+        </div>
+      )}
+
       {upgradeOpen && <UpgradeModal onClose={closeUpgrade} />}
     </div>
   );

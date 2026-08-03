@@ -7,7 +7,7 @@ import Logo from './Logo';
 const isFullPage =
   typeof document !== 'undefined' && document.documentElement.classList.contains('full-page');
 
-export default function Header() {
+export default function Header({ onMenu }) {
   const { isPro, openUpgrade, creditsLeft } = useApp();
 
   const openFullView = () => {
@@ -15,18 +15,22 @@ export default function Header() {
   };
 
   return (
-    <header className="flex items-center justify-between px-4 pb-2 pt-3.5">
-      {/* Brand — hidden on desktop where the sidebar already shows it. */}
+    <header className="flex items-center justify-between border-b border-white/[0.05] px-4 pb-2.5 pt-3.5 md:px-8">
+      {/* Brand + hamburger — hidden on desktop where the sidebar shows them. */}
       <div className="flex items-center gap-2.5 md:hidden">
-        <Logo size={38} />
-        <div className="leading-tight">
-          <h1 className="font-display text-[16px] font-bold tracking-tight text-[#f5edda]">
-            ResearchMind <span className="grad-text">AI</span>
-          </h1>
-          <p className="text-[10px] font-medium uppercase tracking-[0.16em] text-gold-deep/90">
-            AI Research Copilot
-          </p>
-        </div>
+        <button
+          onClick={onMenu}
+          aria-label="Open menu"
+          className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-slate-300 transition-colors hover:border-white/20 hover:text-white"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <path d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+        <Logo size={32} />
+        <h1 className="font-display text-[15px] font-bold tracking-tight text-[#f5edda]">
+          ResearchMind <span className="grad-text">AI</span>
+        </h1>
       </div>
       <div className="hidden md:block" />
 
