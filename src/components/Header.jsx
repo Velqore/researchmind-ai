@@ -8,7 +8,7 @@ const isFullPage =
   typeof document !== 'undefined' && document.documentElement.classList.contains('full-page');
 
 export default function Header() {
-  const { isPro, openUpgrade } = useApp();
+  const { isPro, openUpgrade, creditsLeft } = useApp();
 
   const openFullView = () => {
     chrome.tabs.create({ url: chrome.runtime.getURL('popup.html?full=1') });
@@ -16,7 +16,8 @@ export default function Header() {
 
   return (
     <header className="flex items-center justify-between px-4 pb-2 pt-3.5">
-      <div className="flex items-center gap-2.5">
+      {/* Brand — hidden on desktop where the sidebar already shows it. */}
+      <div className="flex items-center gap-2.5 md:hidden">
         <Logo size={38} />
         <div className="leading-tight">
           <h1 className="font-display text-[16px] font-bold tracking-tight text-[#f5edda]">
@@ -27,8 +28,20 @@ export default function Header() {
           </p>
         </div>
       </div>
+      <div className="hidden md:block" />
 
       <div className="flex items-center gap-1.5">
+        {!isPro && (
+          <button
+            onClick={openUpgrade}
+            title="Daily credits left — tap to go unlimited"
+            className="flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-semibold text-slate-300 transition-colors hover:border-white/20 hover:text-white"
+          >
+            <span className="text-brand-cyan">◆</span>
+            {(creditsLeft ?? 0).toLocaleString()}
+            <span className="hidden text-slate-500 sm:inline">credits</span>
+          </button>
+        )}
       {isExtension && !isFullPage && (
         <button
           onClick={openFullView}

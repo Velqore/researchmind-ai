@@ -1,7 +1,7 @@
-// Global app state: daily usage, license/Pro status, upgrade modal control.
+// Global app state: daily credit usage, license/Pro status, upgrade modal.
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { DAILY_LIMITS } from './config';
-import { consume, getUsage, remaining } from './lib/limits';
+import { FREE_DAILY_CREDITS } from './config';
+import { consume, creditsLeft, getUsage, remaining } from './lib/limits';
 import { getLicense } from './lib/license';
 import { onStorageChange } from './lib/storage';
 
@@ -47,7 +47,8 @@ export function AppProvider({ children }) {
       usage,
       license,
       isPro: license.isPro,
-      limits: DAILY_LIMITS,
+      creditsMax: FREE_DAILY_CREDITS,
+      creditsLeft: usage ? creditsLeft(usage) : FREE_DAILY_CREDITS,
       remainingFor: (feature) => (usage ? remaining(usage, feature) : 0),
       useFeature,
       refresh,

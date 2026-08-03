@@ -1,8 +1,8 @@
-// Free-tier daily limit engine backed by chrome.storage.local.
-// Limits reset at LOCAL midnight: usage is stamped with the local date key,
-// and any read on a new day lazily resets the counters.
+// Free-tier daily CREDIT engine backed by chrome.storage.local.
+// One shared pool of credits per day; every feature spends from it by its
+// CREDIT_COST. Resets at LOCAL midnight (usage stamped with the local date key).
 
-import { DAILY_LIMITS } from '../config';
+import { CREDIT_COST, FREE_DAILY_CREDITS } from '../config';
 import { KEYS, storageGet, storageSet } from './storage';
 
 export function todayKey() {
@@ -11,17 +11,16 @@ export function todayKey() {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+const costOf = (feature) => CREDIT_COST[feature] ?? 1;
+
 function freshUsage() {
-  return {
-    date: todayKey(),
-    counts: { summarize: 0, explain: 0, cite: 0, highlight: 0 },
-  };
+  return { date: todayKey(), spent: 0 };
 }
 
-/** Read usage, resetting counters if the local date rolled over. */
+/** Read usage, resetting the pool if the local date rolled over. */
 export async function getUsage() {
   const stored = await storageGet(KEYS.USAGE);
-  if (!stored || stored.date !== todayKey()) {
+  if (!stored || stored.date !== todayKey() || typeof stored.spent !== 'number') {
     const reset = freshUsage();
     await storageSet(KEYS.USAGE, reset);
     return reset;
@@ -29,28 +28,31 @@ export async function getUsage() {
   return stored;
 }
 
+/** Credits left in today's pool. */
+export function creditsLeft(usage) {
+  return Math.max(0, FREE_DAILY_CREDITS - (usage?.spent ?? 0));
+}
+
+/** How many more times a given feature is affordable right now. */
 export function remaining(usage, feature) {
-  const used = usage?.counts?.[feature] ?? 0;
-  return Math.max(0, DAILY_LIMITS[feature] - used);
+  return Math.floor(creditsLeft(usage) / costOf(feature));
 }
 
 /**
- * Consume one use of a feature. Returns the updated usage object, or null if
- * the feature has no uses left (callers should then show the upgrade prompt).
- * Pro users never consume — call sites skip this when isPro is true.
+ * Spend credits for one use of a feature. Returns the updated usage object, or
+ * null if there aren't enough credits left (callers then show the upgrade
+ * prompt). Pro users never spend — call sites skip this when isPro is true.
  */
 export async function consume(feature) {
   const usage = await getUsage();
-  if (remaining(usage, feature) <= 0) return null;
-  const updated = {
-    ...usage,
-    counts: { ...usage.counts, [feature]: (usage.counts[feature] ?? 0) + 1 },
-  };
+  const cost = costOf(feature);
+  if (creditsLeft(usage) < cost) return null;
+  const updated = { ...usage, spent: (usage.spent ?? 0) + cost };
   await storageSet(KEYS.USAGE, updated);
   return updated;
 }
 
-/** Milliseconds until the next LOCAL midnight (when limits reset). */
+/** Milliseconds until the next LOCAL midnight (when credits reset). */
 export function msUntilMidnight(now = new Date()) {
   const next = new Date(now);
   next.setHours(24, 0, 0, 0);

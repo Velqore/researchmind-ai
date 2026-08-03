@@ -21,7 +21,7 @@ const LENGTHS = [
 const FILE_ICONS = { pdf: '📕', docx: '📘', txt: '📄', md: '📄' };
 
 export default function HomeTab() {
-  const { isPro, license, remainingFor, useFeature, usage, limits } = useApp();
+  const { isPro, license, remainingFor, useFeature, usage } = useApp();
   const [length, setLength] = useState('medium');
   const [state, setState] = useState('idle'); // idle | loading | done | error
   const [errorKind, setErrorKind] = useState('server');
@@ -516,13 +516,13 @@ export default function HomeTab() {
       {state === 'idle' && !isPro && usage && (
         <div className="glass p-4">
           <h3 className="mb-3 text-[12px] font-semibold uppercase tracking-wider text-slate-400">
-            Today’s free usage
+            Today’s free credits
           </h3>
-          <div className="space-y-3">
-            {Object.keys(limits).map((feature) => (
-              <UsageBar key={feature} feature={feature} />
-            ))}
-          </div>
+          <UsageBar />
+          <p className="mt-2.5 text-[10.5px] leading-relaxed text-slate-500">
+            Every action spends credits — a summary costs more than a quick question. Credits
+            reset each day, or go unlimited with Pro.
+          </p>
         </div>
       )}
     </div>
