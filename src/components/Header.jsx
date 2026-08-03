@@ -1,12 +1,13 @@
 import React from 'react';
 import { useApp } from '../AppContext';
 import { isExtension } from '../lib/storage';
+import { navigate } from '../router';
 import Logo from './Logo';
 
 const isFullPage =
   typeof document !== 'undefined' && document.documentElement.classList.contains('full-page');
 
-export default function Header({ onOpenSettings }) {
+export default function Header() {
   const { isPro, openUpgrade } = useApp();
 
   const openFullView = () => {
@@ -41,7 +42,7 @@ export default function Header({ onOpenSettings }) {
 
       {isPro ? (
         <button
-          onClick={onOpenSettings}
+          onClick={() => navigate('/settings')}
           className="animate-pop flex items-center gap-1 rounded-full border border-amber-300/30 bg-gradient-to-r from-amber-400/20 to-yellow-300/10 px-2.5 py-1 text-[11px] font-bold text-amber-300 shadow-glow-sm"
           title="Pro active — view details in Settings"
         >

@@ -169,11 +169,18 @@ def ai_providers(pro: bool = True) -> list[tuple[str, str, str, str]]:
         provs.append(("llm3", LLM3_CHAT_URL, LLM3_API_KEY, LLM3_MODEL))
     return provs
 
-# Hugging Face free-tier inference reliably handles ~45k chars; beyond that it
-# returns 502s. Free users get a smaller cap; Pro users get the full safe max.
-FREE_MAX_INPUT_CHARS = 20_000
+# Per-request input size caps (characters). Pro users get the full safe max;
+# free users get a smaller slice (head+tail via clamp_for_llm). The free cap is
+# env-tunable ("capacity mode"): lowering it cuts token spend per free request
+# roughly proportionally, so the shared AI quota serves many more free users —
+# the main lever for scaling free-tier headroom without extra billing. 8000 ≈ a
+# paper's abstract + intro + conclusion, which makes a solid free summary while
+# reserving full-depth analysis as a reason to upgrade.
+FREE_MAX_INPUT_CHARS = _int_env("FREE_MAX_INPUT_CHARS", 8_000)
 PRO_MAX_INPUT_CHARS = 45_000
 HARD_MAX_INPUT_CHARS = 45_000  # absolute ceiling llm_chat never exceeds
+# Free-tier output cap — smaller than Pro's so free responses cost less too.
+FREE_MAX_OUTPUT_TOKENS = _int_env("FREE_MAX_OUTPUT_TOKENS", 600)
 CACHE_HOURS = 24
 
 # Admin key — set ADMIN_KEY in the backend env to a value of the form
@@ -1481,7 +1488,7 @@ async def summarize(body: SummarizeRequest, request: Request):
         "and stop — do NOT reconstruct a summary from the title or prior knowledge. "
         "Use **bold** for section headers and '• ' for bullets. " + SUMMARY_STYLES[length],
         f"Title: {title}\n\nContent:\n{clamp_for_llm(text, cap)}",
-        max_tokens=900,
+        max_tokens=900 if pro else FREE_MAX_OUTPUT_TOKENS,
         pro=pro,
     )
     await cache_put(body.url, length, summary)
@@ -1974,7 +1981,7 @@ async def ask(body: AskRequest, request: Request):
         f"DOCUMENT TITLE: {body.title or 'Untitled'}\n\n"
         f"DOCUMENT TEXT:\n{clamp_for_llm(text, cap)}\n\n"
         f"QUESTION: {question}",
-        max_tokens=700,
+        max_tokens=700 if pro else FREE_MAX_OUTPUT_TOKENS,
         pro=pro,
     )
     return {"answer": answer}

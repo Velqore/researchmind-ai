@@ -20,8 +20,11 @@ import '@fontsource/inter/800.css';
 // from their content, so any viewport-derived rule collapses the popup.
 // screen.width is the device's physical screen and is always stable.
 const isExtension = typeof chrome !== 'undefined' && !!chrome.storage?.local;
-if (new URLSearchParams(location.search).has('full') || !isExtension) {
-  document.documentElement.classList.add('full-page');
+if (!isExtension) {
+  // Web app → full-width website (left sidebar on desktop, bottom bar on mobile).
+  document.documentElement.classList.add('full-page', 'web-app');
+} else if (new URLSearchParams(location.search).has('full')) {
+  document.documentElement.classList.add('full-page'); // extension, popped to a tab
 } else if (window.screen && window.screen.width < 500) {
   document.documentElement.classList.add('narrow'); // phone browsers (Kiwi/Edge)
 }

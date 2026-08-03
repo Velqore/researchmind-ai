@@ -1,52 +1,68 @@
-import React, { useEffect, useState } from 'react';
+import React, { lazy, Suspense, useEffect } from 'react';
 import { AppProvider, useApp } from './AppContext';
 import { trackVisit } from './lib/api';
 import ErrorBoundary from './components/ErrorBoundary';
 import Header from './components/Header';
+import Nav from './components/Nav';
 import StarField from './components/StarField';
-import TabBar from './components/TabBar';
 import UpgradeModal from './components/UpgradeModal';
-import HomeTab from './components/tabs/HomeTab';
-import ResearchTab from './components/tabs/ResearchTab';
-import WriterTab from './components/tabs/WriterTab';
-import LibraryTab from './components/tabs/LibraryTab';
-import SettingsTab from './components/tabs/SettingsTab';
+import { SkeletonCard } from './components/Skeleton';
+import { useRoute } from './router';
 
-const TABS = {
-  home: HomeTab,
-  research: ResearchTab,
-  writer: WriterTab,
-  library: LibraryTab,
-  settings: SettingsTab,
+// Each page is lazy-loaded: its code (and heavy deps) download only when the
+// route is first visited — so a free user never downloads the Pro-tool code,
+// and the initial load stays light.
+const HomePage = lazy(() => import('./components/tabs/HomeTab'));
+const ResearchPage = lazy(() => import('./components/tabs/ResearchTab'));
+const WriterPage = lazy(() => import('./components/tabs/WriterTab'));
+const LibraryPage = lazy(() => import('./components/tabs/LibraryTab'));
+const SettingsPage = lazy(() => import('./components/tabs/SettingsTab'));
+
+const ROUTE_COMPONENTS = {
+  '/': HomePage,
+  '/research': ResearchPage,
+  '/writer': WriterPage,
+  '/library': LibraryPage,
+  '/settings': SettingsPage,
 };
 
+function matchRoute(path) {
+  if (ROUTE_COMPONENTS[path]) return ROUTE_COMPONENTS[path];
+  // Longest-prefix match so nested paths (e.g. /research/gaps) still resolve.
+  const key = Object.keys(ROUTE_COMPONENTS)
+    .filter((r) => r !== '/' && path.startsWith(r))
+    .sort((a, b) => b.length - a.length)[0];
+  return key ? ROUTE_COMPONENTS[key] : HomePage;
+}
+
 function Shell() {
-  const [tab, setTab] = useState('home');
+  const path = useRoute();
   const { upgradeOpen, closeUpgrade } = useApp();
+  const Page = matchRoute(path);
 
   return (
-    <div className="app-bg flex h-full flex-col">
+    <div className="app-bg flex h-full">
       <StarField />
-      <Header onOpenSettings={() => setTab('settings')} />
-      <main className="flex-1 overflow-y-auto px-4 pb-2 pt-1">
-        {/* Every tab stays mounted and inactive ones are hidden, so search
-            results, summaries and writer output survive tab switches. */}
-        {Object.entries(TABS).map(([id, Tab]) => (
-          <div key={id} className={id === tab ? 'animate-slide-up' : 'hidden'}>
-            <ErrorBoundary>
-              <Tab />
+      <Nav variant="side" />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <Header />
+        <main className="flex-1 overflow-y-auto px-4 pb-2 pt-1">
+          <div className="mx-auto w-full max-w-[680px]">
+            <ErrorBoundary key={path}>
+              <Suspense fallback={<div className="py-3"><SkeletonCard /></div>}>
+                <Page />
+              </Suspense>
             </ErrorBoundary>
           </div>
-        ))}
-      </main>
-      <TabBar active={tab} onChange={setTab} />
+        </main>
+        <Nav variant="bottom" />
+      </div>
       {upgradeOpen && <UpgradeModal onClose={closeUpgrade} />}
     </div>
   );
 }
 
 export default function App() {
-  // Count this visit once per session for the admin dashboard.
   useEffect(() => {
     trackVisit();
   }, []);

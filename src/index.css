@@ -93,6 +93,17 @@ html.full-page #root {
   }
 }
 
+/* Web-app mode: full-width website (left sidebar layout), not the narrow popup
+   column. Overrides the full-page 520px cap. */
+html.web-app body {
+  justify-content: stretch;
+}
+html.web-app #root {
+  max-width: none;
+  border-inline: none;
+  box-shadow: none;
+}
+
 /* Narrow phones (Kiwi / Edge Android render the popup at device width).
    The .narrow class is set from JS using screen.width — NEVER via a viewport
    media query: Chrome popups size themselves from their content, so a
