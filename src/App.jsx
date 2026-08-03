@@ -35,6 +35,44 @@ function matchRoute(path) {
   return key ? ROUTE_COMPONENTS[key] : HomePage;
 }
 
+/** Mobile nav drawer. Uses a state-driven Tailwind transition (mounts once,
+ *  animates in on the next frame, holds its open state) rather than a CSS
+ *  keyframe — keyframes here reverted/restarted, causing the flashing. `!fixed`
+ *  overrides the global `.app-bg > *` position:relative rule that would
+ *  otherwise drop this overlay into the layout flow on the right. */
+function MobileDrawer({ onClose }) {
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    // rAF gives a smooth slide when visible; the setTimeout is a fallback so the
+    // drawer still opens if rAF is paused (backgrounded/non-compositing tab).
+    const raf = requestAnimationFrame(() => setShown(true));
+    const t = setTimeout(() => setShown(true), 60);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(t);
+    };
+  }, []);
+
+  return (
+    <div className="!fixed inset-0 z-[60] md:hidden" role="dialog" aria-modal="true">
+      <div
+        className={`absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-200 ${
+          shown ? 'opacity-100' : 'opacity-0'
+        }`}
+        onClick={onClose}
+      />
+      <div
+        className={`absolute left-0 top-0 h-full border-r border-white/10 bg-ink-950/95 shadow-2xl backdrop-blur-xl transition-transform duration-200 ease-out ${
+          shown ? 'translate-x-0' : '-translate-x-full'
+        }`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <Nav variant="drawer" onNavigate={onClose} />
+      </div>
+    </div>
+  );
+}
+
 function Shell() {
   const path = useRoute();
   const { upgradeOpen, closeUpgrade } = useApp();
@@ -65,17 +103,7 @@ function Shell() {
       </div>
 
       {/* Mobile slide-in drawer (replaces the bottom bar) */}
-      {menuOpen && (
-        <div className="fixed inset-0 z-50 md:hidden" role="dialog" aria-modal="true">
-          <div
-            className="animate-fade-in absolute inset-0 bg-black/60 backdrop-blur-sm"
-            onClick={() => setMenuOpen(false)}
-          />
-          <div className="animate-drawer-in absolute left-0 top-0 h-full border-r border-white/10 bg-ink-950/95 shadow-2xl backdrop-blur-xl">
-            <Nav variant="drawer" onNavigate={() => setMenuOpen(false)} />
-          </div>
-        </div>
-      )}
+      {menuOpen && <MobileDrawer onClose={() => setMenuOpen(false)} />}
 
       {upgradeOpen && <UpgradeModal onClose={closeUpgrade} />}
     </div>
